@@ -3,6 +3,10 @@
   Multi-step questionnaires, admin dashboard, CSV export.
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/License-AGPLv3-blue.svg"></a>
+</p>
+
 ---
 
 Survey is a self-hosted questionnaire platform built for small-to-medium academic studies.
@@ -56,3 +60,9 @@ proxy, backups).
   dev).
 - The whole database is a single SQLite file — back up by copying it.
 - Survey definitions are created/edited from the admin dashboard, not shipped in this repo.
+
+## License
+
+Copyright (C) 2026 Giovanni Spitale. Licensed under AGPL-3.0 — fork it, host it, sell access
+to it, but keep it closed-source and you're in violation. No SaaS forks that don't share
+back. See [LICENSE](LICENSE).
