@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Survey Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    section {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.8rem 2rem; margin-bottom: 1.5rem;
+    }
+    h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #4a5568; margin-bottom: 1.4rem; }
+    .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    input[type=text] {
+      flex: 1; min-width: 160px; padding: 0.55rem 0.8rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.875rem; outline: none;
+    }
+    input[type=text]:focus { border-color: #4a6fa5; }
+    input[type=file] { font-size: 0.82rem; color: #a0aec0; }
+    .field-label { font-size: 0.72rem; color: #718096; margin-bottom: 0.3rem; margin-top: 0.75rem; }
+    .divider { text-align: center; font-size: 0.72rem; color: #4a5568; margin: 0.75rem 0; }
+    textarea {
+      width: 100%; padding: 0.6rem 0.8rem; background: #0f1117;
+      border: 1px solid #2d3148; border-radius: 6px; color: #a0aec0;
+      font-size: 0.78rem; font-family: monospace; resize: vertical; outline: none;
+    }
+    textarea:focus { border-color: #4a6fa5; }
+    .btn-primary {
+      margin-top: 1rem; padding: 0.55rem 1.4rem;
+      background: #0a3c8a; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:hover { background: #0d4fa8; }
+    .error-msg {
+      padding: 0.6rem 0.8rem; background: #2d1515; border: 1px solid #7b2020;
+      border-radius: 6px; font-size: 0.82rem; color: #fc8181; margin-bottom: 1rem;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th {
+      text-align: left; padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #2d3148; color: #4a5568;
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    td { padding: 0.75rem; border-bottom: 1px solid #1e2130; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1e2235; }
+    .badge {
+      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 99px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .badge-open   { background: #0d2e1a; color: #48bb78; border: 1px solid #1a4731; }
+    .badge-closed { background: #1a1d27; color: #4a5568; border: 1px solid #2d3148; }
+    .slug-link { color: #4a6fa5; text-decoration: none; font-family: monospace; font-size: 0.8rem; }
+    .slug-link:hover { color: #63b3ed; }
+    .count { font-weight: 700; color: #e2e8f0; }
+    .date  { color: #4a5568; font-size: 0.78rem; }
+    .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .btn-sm {
+      padding: 0.25rem 0.7rem; border: none; border-radius: 5px;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-toggle  { background: #2d3148; color: #a0aec0; }
+    .btn-toggle:hover  { background: #363b55; }
+    .btn-export  { background: #0f1f3d; color: #4a6fa5; text-decoration: none; }
+    .btn-export:hover  { background: #132a54; color: #63b3ed; }
+    .btn-danger  { background: #2d1515; color: #fc8181; }
+    .btn-danger:hover  { background: #3d1a1a; }
+    .empty { text-align: center; color: #4a5568; padding: 2.5rem 0; font-size: 0.875rem; }
+    .help-toggle {
+      background: none; border: 1px solid #2d3148; border-radius: 99px;
+      color: #718096; font-size: 0.72rem; font-weight: 700;
+      width: 1.4rem; height: 1.4rem; cursor: pointer; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      vertical-align: middle; margin-left: 0.5rem;
+    }
+    .help-toggle:hover { border-color: #4a6fa5; color: #4a6fa5; }
+    .help-box {
+      display: none; margin-top: 1.2rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 8px;
+      padding: 1rem 1.2rem; font-size: 0.8rem; color: #a0aec0; line-height: 1.7;
+    }
+    .help-box.open { display: block; }
+    .help-box code {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed;
+    }
+    .help-box table { width: 100%; margin-top: 0.6rem; font-size: 0.78rem; border-collapse: collapse; }
+    .help-box th { color: #4a5568; text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid #2d3148; font-size: 0.7rem; text-transform: uppercase; }
+    .help-box td { padding: 0.35rem 0.5rem; border-bottom: 1px solid #1e2130; color: #a0aec0; }
+    .help-box td:first-child { color: #e2e8f0; font-family: monospace; }
+    .help-box tr:last-child td { border-bottom: none; }
+    .btn-builder {
+      display: inline-block; margin-left: 0.75rem;
+      padding: 0.2rem 0.65rem; border: 1px solid #2d3148; border-radius: 5px;
+      background: #0f1117; color: #4a6fa5; font-size: 0.72rem; font-weight: 600;
+      text-decoration: none; vertical-align: middle;
+    }
+    .btn-builder:hover { border-color: #4a6fa5; color: #63b3ed; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey Admin</div>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    <section>
+      <h2>New Survey
+        <a href="https://surveyjs.io/create-free-survey" target="_blank" class="btn-builder">Build survey ↗</a>
+      </h2>
+      {% set err = request.query_params.get('error') %}
+      {% if err == 'no_schema'       %}<div class="error-msg">Provide a JSON schema (file or paste).</div>{% endif %}
+      {% if err == 'invalid_json'    %}<div class="error-msg">Invalid JSON — check the schema syntax.</div>{% endif %}
+      {% if err == 'duplicate_slug'  %}<div class="error-msg">Slug already in use — choose a different one.</div>{% endif %}
+
+      <form method="post" action="/admin/surveys" enctype="multipart/form-data">
+        <div class="form-row">
+          <input type="text" name="title" placeholder="Title  (e.g. PGT–GGE Vignette Study 2026)" required>
+          <input type="text" name="slug"  placeholder="slug  (e.g. pgt-gge-2026)" required>
+        </div>
+        <div class="field-label">Upload .json file</div>
+        <input type="file" name="schema_file" accept=".json">
+        <div class="divider">— or paste JSON —</div>
+        <textarea name="schema_text" rows="5" placeholder='{ "title": "...", "pages": [...] }'></textarea>
+        <br>
+        <button type="submit" class="btn-primary">Create survey</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>
+        Surveys
+        <button class="help-toggle" onclick="document.getElementById('lists-help').classList.toggle('open')" title="Static lists info">?</button>
+      </h2>
+      <div class="help-box" id="lists-help">
+        <strong style="color:#e2e8f0;">Static choice lists</strong> — use these in any survey via <code>choicesByUrl</code>.<br>
+        <table>
+          <thead><tr><th>File</th><th>URL</th></tr></thead>
+          <tbody>
+            <tr><td>cantons.json</td><td>/uploads/shared/cantons.json</td></tr>
+            <tr><td>countries.json</td><td>/uploads/shared/countries.json</td></tr>
+          </tbody>
+        </table>
+        <br>
+        In the SurveyJS editor, under <em>Choices from web</em>:<br>
+        &nbsp;· <strong>Web service URL</strong> → the path above<br>
+        &nbsp;· <strong>Path to data</strong> → <em>(leave empty)</em><br>
+        &nbsp;· <strong>Get value to store</strong> → <code>code</code><br>
+        &nbsp;· <strong>Get value to display</strong> → <code>name_en</code> / <code>name_de</code> / <code>name_fr</code> / <code>name_it</code>
+      </div>
+      {% if surveys %}
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th><th>URL</th><th>Status</th><th>Responses</th><th>Created</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in surveys %}
+          <tr>
+            <td>{{ s.title }}</td>
+            <td><a class="slug-link" href="/s/{{ s.slug }}" target="_blank">/s/{{ s.slug }}</a></td>
+            <td><span class="badge {{ 'badge-open' if s.active else 'badge-closed' }}">{{ 'Open' if s.active else 'Closed' }}</span></td>
+            <td class="count">{{ s.response_count }}</td>
+            <td class="date">{{ s.created_at[:10] }}</td>
+            <td>
+              <div class="actions">
+                <form method="post" action="/admin/surveys/{{ s.slug }}/toggle">
+                  <button class="btn-sm btn-toggle">{{ 'Close' if s.active else 'Reopen' }}</button>
+                </form>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/edit">Edit</a>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/randomization">Randomize</a>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/files">Files</a>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/export.csv">CSV</a>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/export.json">JSON</a>
+                <form method="post" action="/admin/surveys/{{ s.slug }}/delete"
+                      onsubmit="return confirm('Delete survey and all {{ s.response_count }} responses?')">
+                  <button class="btn-sm btn-danger">Delete</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty">No surveys yet — create one above.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

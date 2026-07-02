@@ -1,0 +1,58 @@
+<p align="center">
+  <b>A lightweight survey tool for research data collection.</b><br>
+  Multi-step questionnaires, admin dashboard, CSV export.
+</p>
+
+---
+
+Survey is a self-hosted questionnaire platform built for small-to-medium academic studies.
+An admin creates and manages surveys from a dashboard; respondents fill them out at a public
+`/s/{slug}` URL; responses land in SQLite and export to CSV.
+
+## Features
+
+- **Multi-page questionnaires** with per-page and total timing recorded per response.
+- **Canton/country reference data** (EN/DE/FR/IT) — upload once via the admin file manager,
+  reuse across surveys.
+- **Balanced randomization**: multiple independent pools per survey, each with sampleable
+  pages, show-count and balancing counters.
+- **File uploads** per survey, plus a shared folder for static assets.
+- **Language selector** (EN/DE/FR/IT) with browser autodetect and visibility driven by which
+  translations exist in the schema.
+- **Admin dashboard**: create/edit surveys, manage uploads, export responses (CSV) and survey
+  schemas (JSON).
+- Built on the [SurveyJS Form Library](https://surveyjs.io/) (MIT).
+
+## Quick start
+
+```bash
+git clone https://github.com/that-ugly-cat/survey.git
+cd survey
+pip install -r requirements.txt
+cp .env.example .env   # edit SECRET_KEY / ADMIN_PASSWORD
+uvicorn main:app --reload
+```
+
+Open http://localhost:8000/login for the admin dashboard.
+
+## Stack
+
+FastAPI · SQLite · Jinja2 · [SurveyJS](https://surveyjs.io/) on the frontend. No build step.
+
+```
+main.py           — routes (admin, survey render/submit, uploads, export)
+templates/        — login, admin, survey, edit, randomization, files, closed
+static-data/      — reference JSON (cantons, countries) to upload via the admin file manager
+```
+
+## Deployment
+
+See **[DEPLOY.md](DEPLOY.md)** for production setup (environment variables, Docker, reverse
+proxy, backups).
+
+## Tech notes
+
+- Set `SECRET_KEY` and `ADMIN_PASSWORD` in production (both have insecure defaults for local
+  dev).
+- The whole database is a single SQLite file — back up by copying it.
+- Survey definitions are created/edited from the admin dashboard, not shipped in this repo.

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Randomization — {{ title }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header .sub   { font-size: 0.78rem; color: #718096; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 820px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+
+    .pool-card {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.6rem 2rem; margin-bottom: 1.25rem;
+    }
+    .pool-header {
+      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.2rem;
+    }
+    .pool-header input[type=text] {
+      flex: 1; padding: 0.45rem 0.7rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.9rem; font-weight: 600; outline: none;
+    }
+    .pool-header input[type=text]:focus { border-color: #4a6fa5; }
+
+    .field-label { font-size: 0.72rem; color: #718096; margin-bottom: 0.5rem; margin-top: 1rem; }
+    .page-list { display: flex; flex-direction: column; gap: 0.35rem; }
+    .page-item {
+      display: flex; align-items: center; gap: 0.6rem;
+      padding: 0.4rem 0.7rem; border-radius: 6px;
+      background: #0f1117; border: 1px solid #2d3148;
+      font-size: 0.82rem; font-family: monospace; color: #a0aec0; cursor: pointer;
+    }
+    .page-item input[type=checkbox] { accent-color: #4a6fa5; width: 1rem; height: 1rem; cursor: pointer; }
+    .page-item:has(input:checked) { border-color: #4a6fa5; color: #e2e8f0; }
+
+    .count-row { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.9rem; }
+    .count-row label { font-size: 0.82rem; color: #a0aec0; }
+    input[type=number] {
+      width: 5rem; padding: 0.4rem 0.7rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.875rem; outline: none; text-align: center;
+    }
+    input[type=number]:focus { border-color: #4a6fa5; }
+
+    .cond-input, .cond-textarea {
+      width: 100%; padding: 0.45rem 0.7rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.875rem; outline: none;
+    }
+    .cond-input:focus, .cond-textarea:focus { border-color: #4a6fa5; }
+    .cond-textarea { font-family: monospace; font-size: 0.8rem; resize: vertical; }
+    .cond-input:disabled, .cond-textarea:disabled { opacity: 0.3; cursor: not-allowed; }
+    .cond-na { font-size: 0.7rem; color: #4a5568; margin-top: 0.3rem; display: none; }
+
+    .pool-actions { display: flex; gap: 0.6rem; margin-top: 1.1rem; align-items: center; }
+    .hint { font-size: 0.7rem; color: #4a5568; margin-top: 0.4rem; }
+    .hint-inline { color: #4a5568; font-weight: 400; }
+
+    .balance-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 1.4rem; margin-bottom: 0.6rem;
+    }
+    .balance-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+                     letter-spacing: 0.08em; color: #4a5568; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #2d3148;
+         color: #4a5568; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+    td { padding: 0.55rem 0.6rem; border-bottom: 1px solid #1e2130; }
+    tr:last-child td { border-bottom: none; }
+    .cond-key { font-family: monospace; font-size: 0.78rem; color: #e2e8f0; }
+    .bar-wrap { width: 120px; background: #0f1117; border-radius: 99px; height: 5px; overflow: hidden; }
+    .bar-fill { height: 5px; background: #4a6fa5; border-radius: 99px; }
+    .count-n { font-weight: 700; color: #e2e8f0; }
+    .pct { font-size: 0.7rem; color: #4a5568; }
+    .empty-counts { color: #4a5568; font-size: 0.8rem; padding: 0.5rem 0; }
+
+    .btn-primary {
+      padding: 0.45rem 1.1rem; background: #0a3c8a; color: #fff;
+      border: none; border-radius: 6px; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:hover { background: #0d4fa8; }
+    .btn-sm {
+      padding: 0.3rem 0.75rem; border: none; border-radius: 5px;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-secondary { background: #2d3148; color: #a0aec0; }
+    .btn-secondary:hover { background: #363b55; }
+    .btn-danger { background: #2d1515; color: #fc8181; }
+    .btn-danger:hover { background: #3d1a1a; }
+
+    .add-pool-wrap { text-align: center; margin-top: 0.5rem; }
+    .btn-add {
+      padding: 0.55rem 1.4rem; background: #1a1d27; color: #4a6fa5;
+      border: 1px dashed #2d3148; border-radius: 8px;
+      font-size: 0.84rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-add:hover { border-color: #4a6fa5; color: #63b3ed; }
+    .empty-pools { text-align: center; color: #4a5568; padding: 2rem 0; font-size: 0.875rem; }
+
+    .help-btn {
+      background: none; border: 1px solid #2d3148; border-radius: 99px;
+      color: #718096; font-size: 0.72rem; font-weight: 700;
+      width: 1.5rem; height: 1.5rem; cursor: pointer; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .help-btn:hover { border-color: #4a6fa5; color: #4a6fa5; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65); z-index: 100;
+      align-items: flex-start; justify-content: center;
+      padding: 2rem 1rem; overflow-y: auto;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px;
+      padding: 2rem 2.2rem; max-width: 620px; width: 100%;
+      position: relative; margin: auto;
+    }
+    .modal-close {
+      position: absolute; top: 1rem; right: 1.2rem;
+      background: none; border: none; color: #4a5568;
+      font-size: 1.1rem; cursor: pointer; line-height: 1;
+    }
+    .modal-close:hover { color: #a0aec0; }
+    .modal h3 { font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin-bottom: 1.2rem; }
+    .modal h4 { font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.07em; color: #4a6fa5; margin: 1.4rem 0 0.5rem; }
+    .modal p  { font-size: 0.82rem; color: #a0aec0; line-height: 1.7; margin-bottom: 0.5rem; }
+    .modal code {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed; font-family: monospace;
+    }
+    .modal pre {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.75rem 1rem; font-size: 0.78rem; color: #a0aec0;
+      font-family: monospace; overflow-x: auto; margin: 0.4rem 0 0.6rem; line-height: 1.6;
+    }
+    .modal ul { padding-left: 1.2rem; margin-bottom: 0.5rem; }
+    .modal li { font-size: 0.82rem; color: #a0aec0; line-height: 1.7; }
+  </style>
+</head>
+<body>
+  <!-- Help modal -->
+  <div class="modal-overlay" id="help-modal">
+    <div class="modal">
+      <button class="modal-close" onclick="document.getElementById('help-modal').classList.remove('open')">✕</button>
+      <h3>How randomization works</h3>
+
+      <h4>Pool</h4>
+      <p>A pool is a set of survey pages from which the system selects one or more to show each participant. You can have multiple independent pools in the same survey — each runs its own balanced assignment.</p>
+
+      <h4>Show N page(s)</h4>
+      <p>How many pages from the pool each participant sees. With 4 pages and Show = 2, there are 6 possible combinations. Each participant is assigned one combination.</p>
+
+      <h4>Balanced allocation (minimization)</h4>
+      <p>The algorithm always assigns the combination with the lowest count so far. Ties are broken randomly. This keeps exposure counts as balanced as possible without pure randomization — no participant-level blocking needed.</p>
+
+      <h4>Condition variable</h4>
+      <p>Only available when <strong>Show = 1</strong>. Set a name here (e.g. <code>condition</code>) and the system will expose that variable in the survey before it renders — so you can use it in <code>visibleIf</code> expressions on any page:</p>
+      <pre>"visibleIf": "{condition} = 'A' or {condition} = 'C'"</pre>
+      <p>The value is taken from the <strong>Value map</strong> if provided, or is the page name itself if not.</p>
+
+      <h4>Value map</h4>
+      <p>Optional JSON that translates page names into readable condition values. Without it, the raw page name becomes the value. Example:</p>
+      <pre>{"info_a": "A", "info_b": "B", "info_c": "C"}</pre>
+      <p>Or with meaningful names:</p>
+      <pre>{"info_a": "control", "info_b": "treatment"}</pre>
+
+      <h4>Multiple pools</h4>
+      <p>Each pool is independent. A survey can have a pool for condition assignment (Show = 1, with condition variable) and a separate pool for vignette order (Show = 2, no condition variable) — they run simultaneously and don't interfere.</p>
+
+      <h4>Saving a pool resets its counters</h4>
+      <p>Any configuration change resets the assignment counts for that pool. Use <strong>Reset</strong> to clear counts without changing the configuration.</p>
+    </div>
+  </div>
+
+  <header>
+    <div class="brand">Survey Admin</div>
+    <span class="sub">{{ title }}</span>
+    <button class="help-btn" onclick="document.getElementById('help-modal').classList.add('open')" title="How randomization works">?</button>
+    <a href="/admin">← All surveys</a>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+
+    {% if pools %}
+      {% for pool in pools %}
+      <div class="pool-card">
+        <form method="post" action="/admin/surveys/{{ slug }}/randomization/{{ pool.id }}/save"
+              onsubmit="return confirm('Save pool and reset its assignment counters?')">
+          <div class="pool-header">
+            <input type="text" name="pool_name" value="{{ pool.pool_name }}" placeholder="Pool name">
+          </div>
+
+          <div class="field-label">Pages in pool</div>
+          <div class="page-list">
+            {% for name in page_names %}
+            <label class="page-item">
+              <input type="checkbox" name="pool_pages" value="{{ name }}"
+                {% if name in pool.pool_pages %}checked{% endif %}>
+              {{ name }}
+            </label>
+            {% endfor %}
+          </div>
+
+          <div class="count-row">
+            <label>Show</label>
+            <input type="number" name="show_count" min="1" max="{{ page_names | length }}" value="{{ pool.show_count }}"
+                   class="show-count-input" data-pool="{{ pool.id }}">
+            <label>page(s) per participant</label>
+          </div>
+
+          <div class="field-label" style="margin-top:1rem;">
+            Condition variable <span class="hint-inline">(optional — only when Show = 1)</span>
+          </div>
+          <input type="text" name="condition_var" value="{{ pool.condition_var }}"
+                 placeholder="e.g. condition" class="cond-input cond-field-{{ pool.id }}">
+
+          <div class="field-label" style="margin-top:0.75rem;">
+            Value map <span class="hint-inline">(optional JSON — if absent, page name is used as value)</span>
+          </div>
+          <textarea name="condition_map" rows="3"
+                    placeholder='{"page_name": "value", "other_page": "other_value"}'
+                    class="cond-textarea cond-field-{{ pool.id }}">{{ pool.condition_map }}</textarea>
+          <p class="cond-na cond-na-{{ pool.id }}">Not applicable when Show &gt; 1.</p>
+
+          <p class="hint">Saving resets this pool's counters.</p>
+
+          <div class="pool-actions">
+            <button type="submit" class="btn-primary">Save pool</button>
+          </div>
+        </form>
+
+        <div class="balance-header">
+          <span class="balance-title">Balance{% if pool.total %} — {{ pool.total }} assigned{% endif %}</span>
+          {% if pool.counts %}
+          <form method="post" action="/admin/surveys/{{ slug }}/randomization/{{ pool.id }}/reset"
+                onsubmit="return confirm('Reset counters for {{ pool.pool_name }}?')">
+            <button class="btn-sm btn-secondary">Reset</button>
+          </form>
+          {% endif %}
+        </div>
+
+        {% if pool.counts %}
+        <table>
+          <thead><tr><th>Condition</th><th>Count</th><th></th></tr></thead>
+          <tbody>
+            {% for row in pool.counts %}
+            {% set pct = (row.count / pool.total * 100) | round(1) if pool.total else 0 %}
+            <tr>
+              <td class="cond-key">{{ row.condition_key }}</td>
+              <td><span class="count-n">{{ row.count }}</span> <span class="pct">({{ pct }}%)</span></td>
+              <td><div class="bar-wrap"><div class="bar-fill" style="width:{{ pct }}%"></div></div></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="empty-counts">No assignments yet.</p>
+        {% endif %}
+
+        <div style="margin-top:1rem;">
+          <form method="post" action="/admin/surveys/{{ slug }}/randomization/{{ pool.id }}/delete"
+                onsubmit="return confirm('Delete pool {{ pool.pool_name }} and all its counters?')">
+            <button class="btn-sm btn-danger">Delete pool</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="empty-pools">No pools configured — add one below.</p>
+    {% endif %}
+
+    <div class="add-pool-wrap">
+      <form method="post" action="/admin/surveys/{{ slug }}/randomization/add-pool">
+        <button class="btn-add">+ Add pool</button>
+      </form>
+    </div>
+
+  </main>
+
+  <script>
+    document.querySelectorAll('.show-count-input').forEach(function(input) {
+      var poolId = input.dataset.pool;
+      function update() {
+        var sc = parseInt(input.value) || 1;
+        var fields = document.querySelectorAll('.cond-field-' + poolId);
+        var notice = document.querySelector('.cond-na-' + poolId);
+        fields.forEach(function(el) { el.disabled = sc > 1; });
+        if (notice) notice.style.display = sc > 1 ? '' : 'none';
+      }
+      input.addEventListener('input', update);
+      update();
+    });
+  </script>
+</body>
+</html>

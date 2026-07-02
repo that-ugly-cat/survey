@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Edit — {{ title }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header .sub   { font-size: 0.78rem; color: #718096; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    section {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.8rem 2rem; margin-bottom: 1.5rem;
+    }
+    h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #4a5568; margin-bottom: 1.4rem; }
+    .form-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    input[type=text] {
+      flex: 1; min-width: 160px; padding: 0.55rem 0.8rem;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.875rem; outline: none;
+    }
+    input[type=text]:focus { border-color: #4a6fa5; }
+    input[type=file] { font-size: 0.82rem; color: #a0aec0; }
+    .field-label { font-size: 0.72rem; color: #718096; margin-bottom: 0.3rem; margin-top: 0.75rem; }
+    .divider { text-align: center; font-size: 0.72rem; color: #4a5568; margin: 0.75rem 0; }
+    textarea {
+      width: 100%; padding: 0.6rem 0.8rem; background: #0f1117;
+      border: 1px solid #2d3148; border-radius: 6px; color: #a0aec0;
+      font-size: 0.78rem; font-family: monospace; resize: vertical; outline: none;
+    }
+    textarea:focus { border-color: #4a6fa5; }
+    .error-msg {
+      padding: 0.6rem 0.8rem; background: #2d1515; border: 1px solid #7b2020;
+      border-radius: 6px; font-size: 0.82rem; color: #fc8181; margin-bottom: 1rem;
+    }
+    .actions { display: flex; gap: 0.75rem; margin-top: 1rem; align-items: center; }
+    .btn-primary {
+      padding: 0.55rem 1.4rem;
+      background: #0a3c8a; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:hover { background: #0d4fa8; }
+    .btn-secondary {
+      padding: 0.55rem 1.1rem;
+      background: #1a1d27; color: #a0aec0; border: 1px solid #2d3148; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer; text-decoration: none;
+    }
+    .btn-secondary:hover { background: #22263a; }
+    .slug-note { font-size: 0.72rem; color: #4a5568; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey Admin</div>
+    <span class="sub">{{ title }}</span>
+    <a href="/admin">← All surveys</a>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    <section>
+      <h2>Edit survey</h2>
+
+      {% set err = request.query_params.get('error') %}
+      {% if err == 'no_schema'    %}<div class="error-msg">Provide a JSON schema (file or paste).</div>{% endif %}
+      {% if err == 'invalid_json' %}<div class="error-msg">Invalid JSON — check the schema syntax.</div>{% endif %}
+
+      <form method="post" action="/admin/surveys/{{ slug }}/edit" enctype="multipart/form-data">
+        <div class="form-row">
+          <input type="text" name="title" value="{{ title }}" required>
+        </div>
+        <p class="slug-note">Slug: <code>{{ slug }}</code> — cannot be changed</p>
+
+        <div class="field-label">Replace schema — upload .json file</div>
+        <input type="file" name="schema_file" accept=".json">
+        <div class="divider">— or edit JSON below —</div>
+        <textarea name="schema_text" rows="24">{{ schema_json }}</textarea>
+
+        <div class="actions">
+          <button type="submit" class="btn-primary">Save changes</button>
+          <a href="/admin" class="btn-secondary">Cancel</a>
+        </div>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

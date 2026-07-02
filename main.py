@@ -1,0 +1,641 @@
+import csv
+import io
+import itertools
+import json
+import os
+import random
+import re
+import shutil
+import sqlite3
+
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from itsdangerous import BadSignature, URLSafeSerializer
+
+DB_PATH = os.getenv("DB_PATH", "/data/survey.db")
+SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
+UPLOADS_PATH = os.getenv("UPLOADS_PATH", "/data/uploads")
+
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf"}
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+
+signer = URLSafeSerializer(SECRET_KEY)
+app = FastAPI()
+templates = Jinja2Templates(directory="templates")
+
+
+# --- database ---
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_db():
+    db = get_db()
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS surveys (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug        TEXT UNIQUE NOT NULL,
+            title       TEXT NOT NULL,
+            schema_json TEXT NOT NULL,
+            active      INTEGER NOT NULL DEFAULT 1,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS responses (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            survey_id     INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+            response_json TEXT NOT NULL,
+            submitted_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+    """)
+    # migrate single-pool schema to multi-pool if needed
+    has_rand_pools = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='rand_pools'"
+    ).fetchone()
+    if not has_rand_pools:
+        db.executescript("DROP TABLE IF EXISTS assignment_counts; DROP TABLE IF EXISTS randomization;")
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS rand_pools (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            survey_id      INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+            pool_name      TEXT NOT NULL DEFAULT 'Pool',
+            pool_order     INTEGER NOT NULL DEFAULT 0,
+            pool_pages     TEXT NOT NULL DEFAULT '[]',
+            show_count     INTEGER NOT NULL DEFAULT 1,
+            condition_var  TEXT NULL,
+            condition_map  TEXT NULL
+        );
+        CREATE TABLE IF NOT EXISTS assignment_counts (
+            pool_id       INTEGER NOT NULL REFERENCES rand_pools(id) ON DELETE CASCADE,
+            condition_key TEXT NOT NULL,
+            count         INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (pool_id, condition_key)
+        );
+    """)
+    # migrate existing rand_pools tables that predate condition columns
+    cols = {r[1] for r in db.execute("PRAGMA table_info(rand_pools)").fetchall()}
+    if "condition_var" not in cols:
+        db.execute("ALTER TABLE rand_pools ADD COLUMN condition_var TEXT NULL")
+    if "condition_map" not in cols:
+        db.execute("ALTER TABLE rand_pools ADD COLUMN condition_map TEXT NULL")
+    db.commit()
+    db.close()
+
+
+@app.on_event("startup")
+def startup():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(UPLOADS_PATH, exist_ok=True)
+    init_db()
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_PATH), name="uploads")
+
+
+# --- auth helpers ---
+
+def check_admin(request: Request) -> bool:
+    token = request.cookies.get("session")
+    if not token:
+        return False
+    try:
+        signer.loads(token)
+        return True
+    except BadSignature:
+        return False
+
+
+# --- auth routes ---
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: int = 0):
+    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+
+
+@app.post("/login")
+async def login(password: str = Form(...)):
+    if password != ADMIN_PASSWORD:
+        return RedirectResponse("/login?error=1", status_code=302)
+    token = signer.dumps("admin")
+    response = RedirectResponse("/admin", status_code=302)
+    response.set_cookie("session", token, httponly=True, max_age=86400 * 7, samesite="lax")
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=302)
+    response.delete_cookie("session")
+    return response
+
+
+# --- randomization ---
+
+def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> list:
+    all_conditions = [
+        ",".join(sorted(combo))
+        for combo in itertools.combinations(pool, show_count)
+    ]
+    rows = db.execute(
+        "SELECT condition_key, count FROM assignment_counts WHERE pool_id = ?",
+        (pool_id,),
+    ).fetchall()
+    counts = {r["condition_key"]: r["count"] for r in rows}
+    min_count = min((counts.get(c, 0) for c in all_conditions), default=0)
+    candidates = [c for c in all_conditions if counts.get(c, 0) == min_count]
+    chosen = random.choice(candidates)
+    db.execute(
+        """INSERT INTO assignment_counts (pool_id, condition_key, count) VALUES (?, ?, 1)
+           ON CONFLICT (pool_id, condition_key) DO UPDATE SET count = count + 1""",
+        (pool_id, chosen),
+    )
+    db.commit()
+    return chosen.split(",")
+
+
+# --- public routes ---
+
+@app.get("/")
+async def root(request: Request):
+    if check_admin(request):
+        return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse("/login", status_code=302)
+
+
+@app.get("/s/{slug}", response_class=HTMLResponse)
+async def survey_page(request: Request, slug: str):
+    db = get_db()
+    row = db.execute(
+        "SELECT id, title, schema_json FROM surveys WHERE slug = ? AND active = 1", (slug,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return templates.TemplateResponse("closed.html", {"request": request}, status_code=404)
+
+    assigned_pages_list: list = []
+    pool_pages_list: list = []
+    conditions: dict = {}
+    pools = db.execute(
+        "SELECT id, pool_pages, show_count, condition_var, condition_map FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
+        (row["id"],),
+    ).fetchall()
+    for p in pools:
+        pool = json.loads(p["pool_pages"])
+        sc = p["show_count"]
+        if pool and 0 < sc <= len(pool):
+            pool_pages_list.extend(pool)
+            assigned = _assign_condition(db, p["id"], pool, sc)
+            assigned_pages_list.extend(assigned)
+            # condition variable: only meaningful when show_count=1
+            cvar = p["condition_var"]
+            if cvar and sc == 1 and len(assigned) == 1:
+                page = assigned[0]
+                cmap_raw = p["condition_map"]
+                if cmap_raw:
+                    try:
+                        cmap = json.loads(cmap_raw)
+                        value = cmap.get(page, page)
+                    except (json.JSONDecodeError, TypeError):
+                        value = page
+                else:
+                    value = page
+                conditions[cvar] = value
+    assigned_pages = assigned_pages_list or None
+    pool_pages = pool_pages_list or None
+    db.close()
+
+    return templates.TemplateResponse("survey.html", {
+        "request": request,
+        "title": row["title"],
+        "slug": slug,
+        "schema": json.loads(row["schema_json"]),
+        "assigned_pages": assigned_pages,
+        "pool_pages": pool_pages,
+        "conditions": conditions,
+    })
+
+
+@app.post("/s/{slug}/submit")
+async def submit(slug: str, request: Request):
+    db = get_db()
+    row = db.execute(
+        "SELECT id, active FROM surveys WHERE slug = ?", (slug,)
+    ).fetchone()
+    if not row or not row["active"]:
+        db.close()
+        return JSONResponse({"error": "survey not found or closed"}, status_code=404)
+    data = await request.json()
+    db.execute(
+        "INSERT INTO responses (survey_id, response_json) VALUES (?, ?)",
+        (row["id"], json.dumps(data, ensure_ascii=False)),
+    )
+    db.commit()
+    db.close()
+    return JSONResponse({"ok": True})
+
+
+# --- admin routes ---
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_home(request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    surveys = db.execute("""
+        SELECT s.*, COUNT(r.id) AS response_count
+        FROM surveys s
+        LEFT JOIN responses r ON r.survey_id = s.id
+        GROUP BY s.id
+        ORDER BY s.created_at DESC
+    """).fetchall()
+    db.close()
+    return templates.TemplateResponse("admin.html", {"request": request, "surveys": surveys})
+
+
+@app.post("/admin/surveys")
+async def create_survey(
+    request: Request,
+    title: str = Form(...),
+    slug: str = Form(...),
+    schema_file: UploadFile = File(None),
+    schema_text: str = Form(""),
+):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+
+    if schema_file and schema_file.filename:
+        raw = await schema_file.read()
+        schema_str = raw.decode("utf-8")
+    elif schema_text.strip():
+        schema_str = schema_text.strip()
+    else:
+        return RedirectResponse("/admin?error=no_schema", status_code=302)
+
+    try:
+        json.loads(schema_str)
+    except json.JSONDecodeError:
+        return RedirectResponse("/admin?error=invalid_json", status_code=302)
+
+    slug = slug.strip().lower().replace(" ", "-")
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO surveys (slug, title, schema_json) VALUES (?, ?, ?)",
+            (slug, title, schema_str),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.close()
+        return RedirectResponse("/admin?error=duplicate_slug", status_code=302)
+    db.close()
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.get("/admin/surveys/{slug}/edit", response_class=HTMLResponse)
+async def edit_survey_page(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    row = db.execute("SELECT title, schema_json FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    db.close()
+    if not row:
+        return RedirectResponse("/admin", status_code=302)
+    return templates.TemplateResponse("edit.html", {
+        "request": request,
+        "slug": slug,
+        "title": row["title"],
+        "schema_json": json.dumps(json.loads(row["schema_json"]), indent=2, ensure_ascii=False),
+    })
+
+
+@app.post("/admin/surveys/{slug}/edit")
+async def edit_survey(
+    slug: str,
+    request: Request,
+    title: str = Form(...),
+    schema_file: UploadFile = File(None),
+    schema_text: str = Form(""),
+):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+
+    if schema_file and schema_file.filename:
+        raw = await schema_file.read()
+        schema_str = raw.decode("utf-8")
+    elif schema_text.strip():
+        schema_str = schema_text.strip()
+    else:
+        return RedirectResponse(f"/admin/surveys/{slug}/edit?error=no_schema", status_code=302)
+
+    try:
+        json.loads(schema_str)
+    except json.JSONDecodeError:
+        return RedirectResponse(f"/admin/surveys/{slug}/edit?error=invalid_json", status_code=302)
+
+    db = get_db()
+    db.execute(
+        "UPDATE surveys SET title = ?, schema_json = ? WHERE slug = ?",
+        (title, schema_str, slug),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/toggle")
+async def toggle_survey(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    db.execute("UPDATE surveys SET active = 1 - active WHERE slug = ?", (slug,))
+    db.commit()
+    db.close()
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/delete")
+async def delete_survey(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    db.execute("DELETE FROM surveys WHERE slug = ?", (slug,))
+    db.commit()
+    db.close()
+    shutil.rmtree(os.path.join(UPLOADS_PATH, slug), ignore_errors=True)
+    return RedirectResponse("/admin", status_code=302)
+
+
+# --- admin randomization ---
+
+@app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
+async def randomization_page(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    survey = db.execute("SELECT id, title, schema_json FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not survey:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    schema = json.loads(survey["schema_json"])
+    page_names = [p.get("name", f"page{i+1}") for i, p in enumerate(schema.get("pages", []))]
+    pools_raw = db.execute(
+        "SELECT id, pool_name, pool_order, pool_pages, show_count, condition_var, condition_map FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
+        (survey["id"],),
+    ).fetchall()
+    pools_data = []
+    for pool in pools_raw:
+        counts = db.execute(
+            "SELECT condition_key, count FROM assignment_counts WHERE pool_id = ? ORDER BY condition_key",
+            (pool["id"],),
+        ).fetchall()
+        pools_data.append({
+            "id": pool["id"],
+            "pool_name": pool["pool_name"],
+            "pool_pages": json.loads(pool["pool_pages"]),
+            "show_count": pool["show_count"],
+            "condition_var": pool["condition_var"] or "",
+            "condition_map": pool["condition_map"] or "",
+            "counts": counts,
+            "total": sum(r["count"] for r in counts),
+        })
+    db.close()
+    return templates.TemplateResponse("randomization.html", {
+        "request": request,
+        "slug": slug,
+        "title": survey["title"],
+        "page_names": page_names,
+        "pools": pools_data,
+    })
+
+
+@app.post("/admin/surveys/{slug}/randomization/add-pool")
+async def add_pool(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    row = db.execute("SELECT id FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if row:
+        order = db.execute(
+            "SELECT COALESCE(MAX(pool_order)+1, 0) FROM rand_pools WHERE survey_id = ?", (row["id"],)
+        ).fetchone()[0]
+        db.execute(
+            "INSERT INTO rand_pools (survey_id, pool_name, pool_order) VALUES (?, ?, ?)",
+            (row["id"], f"Pool {order + 1}", order),
+        )
+        db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/{pool_id}/save")
+async def save_pool(slug: str, pool_id: int, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    form = await request.form()
+    pool_pages = form.getlist("pool_pages")
+    pool_name = form.get("pool_name", "Pool").strip() or "Pool"
+    try:
+        show_count = max(1, int(form.get("show_count", 1)))
+    except ValueError:
+        show_count = 1
+    condition_var = form.get("condition_var", "").strip() or None
+    # condition_map only valid when show_count=1; validate JSON if provided
+    condition_map = None
+    if show_count == 1 and condition_var:
+        cmap_raw = form.get("condition_map", "").strip()
+        if cmap_raw:
+            try:
+                json.loads(cmap_raw)
+                condition_map = cmap_raw
+            except json.JSONDecodeError:
+                pass  # silently discard invalid JSON
+    db = get_db()
+    db.execute(
+        "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, condition_var = ?, condition_map = ? WHERE id = ?",
+        (pool_name, json.dumps(pool_pages), show_count, condition_var, condition_map, pool_id),
+    )
+    db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/{pool_id}/delete")
+async def delete_pool(slug: str, pool_id: int, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    db.execute("DELETE FROM rand_pools WHERE id = ?", (pool_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/{pool_id}/reset")
+async def reset_pool_counts(slug: str, pool_id: int, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+# --- file uploads ---
+
+def _safe_filename(name: str) -> str:
+    name = os.path.basename(name)
+    name = re.sub(r"[^\w.\-]", "_", name)
+    return name or "file"
+
+
+def _upload_dir(slug: str) -> str:
+    path = os.path.join(UPLOADS_PATH, slug)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+@app.get("/admin/surveys/{slug}/files", response_class=HTMLResponse)
+async def files_page(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    row = db.execute("SELECT title FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    db.close()
+    if not row:
+        return RedirectResponse("/admin", status_code=302)
+    d = _upload_dir(slug)
+    files = sorted(os.listdir(d))
+    return templates.TemplateResponse("files.html", {
+        "request": request,
+        "slug": slug,
+        "title": row["title"],
+        "files": files,
+    })
+
+
+@app.post("/admin/surveys/{slug}/upload")
+async def upload_file(slug: str, request: Request, file: UploadFile = File(...)):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    db = get_db()
+    exists = db.execute("SELECT 1 FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    db.close()
+    if not exists:
+        return RedirectResponse("/admin", status_code=302)
+
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        return RedirectResponse(f"/admin/surveys/{slug}/files?error=ext", status_code=302)
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        return RedirectResponse(f"/admin/surveys/{slug}/files?error=size", status_code=302)
+
+    dest = os.path.join(_upload_dir(slug), _safe_filename(file.filename))
+    with open(dest, "wb") as f:
+        f.write(content)
+
+    return RedirectResponse(f"/admin/surveys/{slug}/files", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/files/{filename}/delete")
+async def delete_file(slug: str, filename: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    safe = _safe_filename(filename)
+    path = os.path.join(UPLOADS_PATH, slug, safe)
+    if os.path.isfile(path):
+        os.remove(path)
+    return RedirectResponse(f"/admin/surveys/{slug}/files", status_code=302)
+
+
+# --- export ---
+
+def _flatten(data: dict, prefix: str = "") -> dict:
+    result = {}
+    for k, v in data.items():
+        key = f"{prefix}_{k}" if prefix else k
+        if isinstance(v, dict):
+            result.update(_flatten(v, key))
+        elif isinstance(v, list):
+            result[key] = ";".join(str(i) for i in v)
+        else:
+            result[key] = v
+    return result
+
+
+def _get_responses(slug: str):
+    db = get_db()
+    row = db.execute("SELECT id FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not row:
+        db.close()
+        return None, None
+    rows = db.execute(
+        "SELECT response_json, submitted_at FROM responses WHERE survey_id = ? ORDER BY submitted_at",
+        (row["id"],),
+    ).fetchall()
+    db.close()
+    return slug, rows
+
+
+@app.get("/admin/surveys/{slug}/export.csv")
+async def export_csv(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    _, rows = _get_responses(slug)
+    if rows is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if not rows:
+        return HTMLResponse("No responses yet.")
+
+    flat_rows = []
+    all_keys: list[str] = []
+    seen_keys: set[str] = set()
+    for r in rows:
+        flat = _flatten(json.loads(r["response_json"]))
+        flat["_submitted_at"] = r["submitted_at"]
+        flat_rows.append(flat)
+        for k in flat:
+            if k not in seen_keys:
+                seen_keys.add(k)
+                all_keys.append(k)
+
+    # _submitted_at last
+    cols = [k for k in all_keys if k != "_submitted_at"] + ["_submitted_at"]
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore", restval="")
+    writer.writeheader()
+    writer.writerows(flat_rows)
+
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.csv"'},
+    )
+
+
+@app.get("/admin/surveys/{slug}/export.json")
+async def export_json(slug: str, request: Request):
+    if not check_admin(request):
+        return RedirectResponse("/login", status_code=302)
+    _, rows = _get_responses(slug)
+    if rows is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    data = [
+        {"submitted_at": r["submitted_at"], "data": json.loads(r["response_json"])}
+        for r in rows
+    ]
+    return StreamingResponse(
+        io.BytesIO(json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
+    )

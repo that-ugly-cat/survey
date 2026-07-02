@@ -1,0 +1,13 @@
+# Survey
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+*.sqlite3
+.env
+.DS_Store
+data/
+.venv/
+
+# study-specific survey schemas stay local, not published
+*.survey.json
