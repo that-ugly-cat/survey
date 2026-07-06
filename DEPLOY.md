@@ -41,7 +41,7 @@ file and uploads.
 Put it behind a proxy that terminates TLS. Example **Caddy**:
 
 ```
-survey.example.org {
+yourdomain.example {
     reverse_proxy 127.0.0.1:8001
 }
 ```
@@ -50,8 +50,8 @@ Reload after editing: `systemctl reload caddy`.
 
 ## 5. Verify
 
-- `https://survey.example.org/login` — admin login
-- `https://survey.example.org/s/{slug}` — public survey
+- `https://yourdomain.example/login` — admin login
+- `https://yourdomain.example/s/{slug}` — public survey
 
 ## 6. Updating
 
