@@ -4,162 +4,178 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Survey — survey.borant.eu</title>
-  <meta name="description" content="Build multilingual research surveys, collect responses, export clean data. Hosted on survey.borant.eu.">
   <style>
-    :root {
-      --navy: #0D1B3E; --navy-mid: #1A2F5E; --orange: #E87722; --orange-dark: #C4621A;
-      --white: #ffffff; --off-white: #F5F7FA; --gray-light: #E8ECF2;
-      --gray-mid: #9AA5B8; --gray-dark: #4A5568;
-    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      color: var(--navy); background: var(--white); line-height: 1.6;
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f1117; color: #e2e8f0; min-height: 100vh; display: flex; }
+
+    /* ── Landing (left) ── */
+    .landing {
+      flex: 1; display: flex; flex-direction: column; justify-content: center;
+      padding: 4rem; border-right: 1px solid #1e2235; min-width: 0;
     }
-    a { color: var(--orange); text-decoration: none; }
-    .container { max-width: 960px; margin: 0 auto; padding: 0 1.5rem; }
+    .brand { font-size: 1.9rem; font-weight: 900; letter-spacing: -0.02em; margin-bottom: 0.75rem; }
+    .brand span { color: #63b3ed; }
+    .tagline { font-size: 0.95rem; color: #718096; line-height: 1.75; max-width: 540px; margin-bottom: 2.5rem; }
 
-    nav {
-      background: var(--navy); border-bottom: 3px solid var(--orange);
-      position: sticky; top: 0; z-index: 10;
+    .pillars { display: flex; flex-direction: column; gap: 1.1rem; max-width: 520px; margin-bottom: 2.5rem; }
+    .pillar { display: flex; gap: 0.9rem; align-items: flex-start; }
+    .pillar-icon {
+      flex-shrink: 0; width: 34px; height: 34px;
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.95rem; font-weight: 700; color: #63b3ed;
     }
-    .nav-inner {
-      max-width: 960px; margin: 0 auto; padding: 0.9rem 1.5rem;
-      display: flex; align-items: center; justify-content: space-between;
+    .pillar-text strong { display: block; color: #e2e8f0; font-size: 0.88rem; margin-bottom: 0.2rem; }
+    .pillar-text span { font-size: 0.82rem; color: #718096; line-height: 1.5; }
+
+    .steps { display: flex; gap: 1rem; max-width: 540px; margin-bottom: 2.5rem; }
+    .step-box { flex: 1; background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 0.9rem 1rem; }
+    .step-num { font-size: 0.7rem; font-weight: 700; color: #4a6fa5; letter-spacing: 0.08em; }
+    .step-box strong { display: block; color: #e2e8f0; font-size: 0.85rem; margin: 0.35rem 0 0.2rem; }
+    .step-box span { font-size: 0.76rem; color: #718096; line-height: 1.45; }
+
+    .credits { font-size: 0.72rem; color: #4a5568; line-height: 1.7; max-width: 540px; }
+    .credits a { color: #4a6fa5; text-decoration: none; }
+    .credits a:hover { color: #63b3ed; }
+
+    /* ── Auth panel (right) ── */
+    .login-panel { width: 360px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; padding: 2.5rem; }
+    .login-card { width: 100%; }
+    .login-card .title { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
+    .login-card .sub { font-size: 0.78rem; color: #718096; margin-bottom: 1.4rem; }
+
+    .auth-tabs { display: flex; gap: 0.4rem; margin-bottom: 1.2rem; }
+    .auth-tabs button {
+      flex: 1; padding: 0.45rem; background: #1a1d27; border: 1px solid #2d3148;
+      border-radius: 6px; color: #718096; font-size: 0.8rem; font-weight: 600; cursor: pointer;
     }
-    .nav-brand { color: #fff; font-weight: 700; letter-spacing: 0.03em; }
-    .nav-brand small { display: block; font-size: 0.68rem; color: var(--gray-mid);
-      font-weight: 400; text-transform: uppercase; letter-spacing: 0.12em; }
-    .nav-actions { display: flex; gap: 0.75rem; }
+    .auth-tabs button.active { background: #0f1f3d; border-color: #4a6fa5; color: #63b3ed; }
 
-    .btn {
-      display: inline-block; padding: 0.6rem 1.4rem; border-radius: 6px;
-      font-size: 0.9rem; font-weight: 600; cursor: pointer; border: 1.5px solid transparent;
-      transition: background 0.15s, color 0.15s;
+    label { display: block; font-size: 0.75rem; color: #a0aec0; margin-bottom: 0.3rem; margin-top: 0.9rem; }
+    input { width: 100%; padding: 0.6rem 0.8rem; background: #0f1117; border: 1px solid #2d3148;
+            border-radius: 6px; color: #e2e8f0; font-size: 0.9rem; outline: none; }
+    input:focus { border-color: #4a6fa5; }
+    .hint { font-size: 0.7rem; color: #4a5568; margin-top: 0.3rem; }
+    .btn-submit { width: 100%; margin-top: 1.4rem; padding: 0.65rem; background: #0a3c8a; color: #fff;
+                  border: none; border-radius: 6px; font-size: 0.9rem; font-weight: 600; cursor: pointer; }
+    .btn-submit:hover { background: #0d4fa8; }
+    .error { margin-top: 1rem; padding: 0.6rem 0.8rem; background: #2d1515; border: 1px solid #7b2020;
+             border-radius: 6px; font-size: 0.82rem; color: #fc8181; }
+    .note { margin-top: 1rem; font-size: 0.72rem; color: #4a5568; line-height: 1.5; }
+
+    @media (max-width: 800px) {
+      body { flex-direction: column; }
+      .landing { border-right: none; border-bottom: 1px solid #1e2235; padding: 2.5rem 1.5rem; }
+      .login-panel { width: 100%; padding: 2rem 1.5rem; }
+      .steps { flex-direction: column; }
     }
-    .btn-primary { background: var(--orange); color: #fff; }
-    .btn-primary:hover { background: var(--orange-dark); color: #fff; }
-    .btn-ghost { background: transparent; color: #fff; border-color: var(--gray-mid); }
-    .btn-ghost:hover { background: var(--navy-mid); }
-    .btn-outline { background: transparent; color: var(--navy); border-color: var(--navy); }
-    .btn-outline:hover { background: var(--navy); color: #fff; }
-
-    .hero { background: var(--navy); color: #fff; padding: 4.5rem 0 4rem; }
-    .hero .eyebrow { color: var(--orange); font-size: 0.75rem; font-weight: 700;
-      text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 1rem; }
-    .hero h1 { color: #fff; font-size: 2.6rem; line-height: 1.15; margin-bottom: 1.2rem; }
-    .hero p { color: var(--gray-light); font-size: 1.05rem; max-width: 620px; margin-bottom: 2rem; }
-    .hero-cta { display: flex; gap: 1rem; flex-wrap: wrap; }
-
-    section.block { padding: 3.5rem 0; }
-    section.block h2 { font-size: 1.6rem; margin-bottom: 0.6rem; }
-    section.block .sub { color: var(--gray-dark); margin-bottom: 2.4rem; max-width: 620px; }
-    .alt { background: var(--off-white); }
-
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.4rem; }
-    .card {
-      background: #fff; border: 1px solid var(--gray-light); border-radius: 10px;
-      padding: 1.6rem 1.5rem;
-    }
-    .card .num { color: var(--orange); font-weight: 700; font-size: 0.8rem; letter-spacing: 0.08em; }
-    .card h3 { font-size: 1.05rem; margin: 0.5rem 0 0.5rem; }
-    .card p { color: var(--gray-dark); font-size: 0.92rem; }
-
-    .features { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.6rem 2rem; }
-    .features li { padding: 0.55rem 0 0.55rem 1.5rem; position: relative; color: var(--gray-dark); font-size: 0.95rem; }
-    .features li::before { content: "→"; position: absolute; left: 0; color: var(--orange); font-weight: 700; }
-    .features strong { color: var(--navy); }
-
-    .cta-band { background: var(--navy-mid); color: #fff; padding: 3rem 0; text-align: center; }
-    .cta-band h2 { color: #fff; font-size: 1.5rem; margin-bottom: 1.4rem; }
-
-    footer { background: var(--navy); color: var(--gray-mid); padding: 2rem 0; font-size: 0.82rem; }
-    footer .container { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; }
-
-    @media (max-width: 560px) { .hero h1 { font-size: 2rem; } }
   </style>
 </head>
 <body>
-  <nav>
-    <div class="nav-inner">
-      <div class="nav-brand">Survey<small>survey.borant.eu</small></div>
-      <div class="nav-actions">
-        <a href="/login" class="btn btn-ghost">Sign in</a>
-        <a href="/register" class="btn btn-primary">Register</a>
-      </div>
-    </div>
-  </nav>
 
-  <header class="hero">
-    <div class="container">
-      <div class="eyebrow">A research tool by Giovanni Spitale</div>
-      <h1>Build surveys. Collect data.<br>Own your results.</h1>
-      <p>
-        A self-hosted platform for multilingual research surveys — powered by the
-        SurveyJS form engine. Design a questionnaire, share a link, and download clean,
-        analysis-ready data. Every account keeps its own surveys and responses private.
-      </p>
-      <div class="hero-cta">
-        <a href="/register" class="btn btn-primary">Create an account</a>
-        <a href="/login" class="btn btn-ghost">I already have one</a>
-      </div>
-    </div>
-  </header>
+  <!-- Landing -->
+  <div class="landing">
+    <div class="brand">Survey<span>.</span></div>
+    <p class="tagline">
+      A self-hosted platform for multilingual research surveys, built on the SurveyJS form
+      engine. Design a questionnaire, share a link, and download clean, analysis-ready data.
+      Every account keeps its own surveys and responses private.
+    </p>
 
-  <section class="block">
-    <div class="container">
-      <h2>How it works</h2>
-      <p class="sub">Three steps from an idea to a dataset.</p>
-      <div class="grid">
-        <div class="card">
-          <div class="num">01</div>
-          <h3>Design</h3>
-          <p>Build your questionnaire in the free SurveyJS visual editor, then paste or
-          upload the JSON schema. Multiple languages (EN/DE/FR/IT) in a single survey.</p>
+    <div class="pillars">
+      <div class="pillar">
+        <div class="pillar-icon">◈</div>
+        <div class="pillar-text">
+          <strong>Your own workspace</strong>
+          <span>Register in seconds. Your surveys and responses are yours alone — never shared across accounts.</span>
         </div>
-        <div class="card">
-          <div class="num">02</div>
-          <h3>Share</h3>
-          <p>Each survey gets a clean public link (<code>/s/your-slug</code>). Respondents
-          need no account; the language auto-detects from their browser.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon">文</div>
+        <div class="pillar-text">
+          <strong>Multilingual</strong>
+          <span>EN / DE / FR / IT in a single survey, with automatic language detection from the respondent's browser.</span>
         </div>
-        <div class="card">
-          <div class="num">03</div>
-          <h3>Export</h3>
-          <p>Download responses as flat CSV or structured JSON at any time — including
-          per-page timing and randomization assignments.</p>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon">⇄</div>
+        <div class="pillar-text">
+          <strong>Balanced randomization</strong>
+          <span>Independent assignment pools with live balancing counters — ready for experimental designs.</span>
+        </div>
+      </div>
+      <div class="pillar">
+        <div class="pillar-icon">🔒</div>
+        <div class="pillar-text">
+          <strong>Two-factor secured</strong>
+          <span>Mandatory TOTP (Ente Auth, Google Authenticator, Aegis…) with one-time backup codes.</span>
         </div>
       </div>
     </div>
-  </section>
 
-  <section class="block alt">
-    <div class="container">
-      <h2>What you get</h2>
-      <p class="sub">Everything a small research team needs, nothing it doesn't.</p>
-      <ul class="features">
-        <li><strong>Private workspace</strong> — your surveys and responses are yours alone.</li>
-        <li><strong>Multilingual</strong> — EN / DE / FR / IT with automatic language selection.</li>
-        <li><strong>Balanced randomization</strong> — multi-pool assignment with live balance counters.</li>
-        <li><strong>Per-survey file uploads</strong> — images, PDFs and shared choice lists.</li>
-        <li><strong>Response timing</strong> — per-page and total, captured automatically.</li>
-        <li><strong>Two-factor security</strong> — mandatory TOTP (Ente Auth, Google Authenticator…).</li>
-      </ul>
+    <div class="steps">
+      <div class="step-box"><div class="step-num">01</div><strong>Design</strong><span>Build in the SurveyJS editor, paste the JSON.</span></div>
+      <div class="step-box"><div class="step-num">02</div><strong>Share</strong><span>Send the public <code>/s/slug</code> link.</span></div>
+      <div class="step-box"><div class="step-num">03</div><strong>Export</strong><span>Download responses as CSV or JSON.</span></div>
     </div>
-  </section>
 
-  <div class="cta-band">
-    <div class="container">
-      <h2>Ready to run your study?</h2>
-      <a href="/register" class="btn btn-primary">Register now</a>
+    <div class="credits">
+      Developed by <a href="https://www.ibme.uzh.ch/en/Biomedical-Ethics/Team/Research-Fellows/Giovanni-Spitale.html" target="_blank" rel="noopener">Giovanni Spitale</a>,
+      Institute of Biomedical Ethics, University of Zurich — hosted on survey.borant.eu.
     </div>
   </div>
 
-  <footer>
-    <div class="container">
-      <span>survey.borant.eu — a Giovanni Spitale research tool</span>
-      <span><a href="/login">Sign in</a> · <a href="/register">Register</a></span>
+  <!-- Auth -->
+  <div class="login-panel">
+    <div class="login-card">
+      <div class="title">Welcome</div>
+      <div class="sub">Sign in or create an account to get started.</div>
+
+      <div class="auth-tabs">
+        <button type="button" id="tab-login" onclick="showTab('login')">Sign in</button>
+        <button type="button" id="tab-register" onclick="showTab('register')">Register</button>
+      </div>
+
+      <form id="form-login" method="post" action="/login">
+        <label for="login-email">Email</label>
+        <input type="email" id="login-email" name="email" autocomplete="email" required>
+        <label for="login-password">Password</label>
+        <input type="password" id="login-password" name="password" autocomplete="current-password" required>
+        <button type="submit" class="btn-submit">Sign in</button>
+        {% if error %}<div class="error">Wrong email or password.</div>{% endif %}
+      </form>
+
+      <form id="form-register" method="post" action="/register" style="display:none">
+        <label for="reg-name">Name</label>
+        <input type="text" id="reg-name" name="name" required>
+        <label for="reg-email">Email</label>
+        <input type="email" id="reg-email" name="email" autocomplete="email" required>
+        <label for="reg-password">Password</label>
+        <input type="password" id="reg-password" name="password" minlength="8" required>
+        <div class="hint">At least 8 characters.</div>
+        <button type="submit" class="btn-submit">Create account</button>
+        {% if reg_error == 'email' %}<div class="error">Enter a valid email address.</div>{% endif %}
+        {% if reg_error == 'pwd'   %}<div class="error">Password must be at least 8 characters.</div>{% endif %}
+        {% if reg_error == 'name'  %}<div class="error">Enter your name.</div>{% endif %}
+        {% if reg_error == 'taken' %}<div class="error">That email is already registered.</div>{% endif %}
+      </form>
+
+      <div class="note">Two-factor authentication is required — you'll set it up right after your first sign-in.</div>
     </div>
-  </footer>
+  </div>
+
+  <script>
+    function showTab(which) {
+      document.getElementById('form-login').style.display = which === 'login' ? '' : 'none';
+      document.getElementById('form-register').style.display = which === 'register' ? '' : 'none';
+      document.getElementById('tab-login').classList.toggle('active', which === 'login');
+      document.getElementById('tab-register').classList.toggle('active', which === 'register');
+      (which === 'register'
+        ? document.getElementById('reg-name')
+        : document.getElementById('login-email')).focus();
+    }
+    showTab('{{ tab or 'login' }}');
+  </script>
 </body>
 </html>

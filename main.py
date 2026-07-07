@@ -151,9 +151,10 @@ def _owned_survey(db, slug: str, user):
 
 # --- auth routes ---
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request, error: int = 0):
-    return templates.TemplateResponse("login.html", {"request": request, "error": error})
+@app.get("/login")
+async def login_page(error: int = 0):
+    # the login form lives on the combined landing page
+    return RedirectResponse("/?error=1" if error else "/", status_code=302)
 
 
 @app.post("/login")
@@ -164,16 +165,16 @@ async def login(email: str = Form(...), password: str = Form(...)):
     ).fetchone()
     db.close()
     if not user or not auth.verify_password(password, user["hashed_password"]):
-        return RedirectResponse("/login?error=1", status_code=302)
+        return RedirectResponse("/?error=1", status_code=302)
     # password ok → pending session; full access only after the 2FA step
     response = RedirectResponse("/2fa", status_code=302)
     auth.set_session(response, user["id"], "pending_2fa")
     return response
 
 
-@app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request, error: str = ""):
-    return templates.TemplateResponse("register.html", {"request": request, "error": error})
+@app.get("/register")
+async def register_page():
+    return RedirectResponse("/?tab=register", status_code=302)
 
 
 @app.post("/register")
@@ -181,11 +182,11 @@ async def register(name: str = Form(...), email: str = Form(...), password: str 
     email = email.strip().lower()
     name = name.strip()
     if not EMAIL_RE.match(email):
-        return RedirectResponse("/register?error=email", status_code=302)
+        return RedirectResponse("/?tab=register&reg_error=email", status_code=302)
     if len(password) < 8:
-        return RedirectResponse("/register?error=pwd", status_code=302)
+        return RedirectResponse("/?tab=register&reg_error=pwd", status_code=302)
     if not name:
-        return RedirectResponse("/register?error=name", status_code=302)
+        return RedirectResponse("/?tab=register&reg_error=name", status_code=302)
     db = get_db()
     try:
         db.execute(
@@ -195,7 +196,7 @@ async def register(name: str = Form(...), email: str = Form(...), password: str 
         db.commit()
     except sqlite3.IntegrityError:
         db.close()
-        return RedirectResponse("/register?error=taken", status_code=302)
+        return RedirectResponse("/?tab=register&reg_error=taken", status_code=302)
     user_id = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()["id"]
     db.close()
     # accounts are active immediately, but 2FA enrolment is mandatory before use
@@ -326,13 +327,18 @@ def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> list:
 # --- public routes ---
 
 @app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
+async def root(request: Request, error: int = 0, reg_error: str = "", tab: str = ""):
     db = get_db()
     user = auth.current_user(request, db)
     db.close()
     if user:
         return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("landing.html", {"request": request})
+    return templates.TemplateResponse("landing.html", {
+        "request": request,
+        "error": error,
+        "reg_error": reg_error,
+        "tab": "register" if (tab == "register" or reg_error) else "login",
+    })
 
 
 @app.get("/s/{slug}", response_class=HTMLResponse)
