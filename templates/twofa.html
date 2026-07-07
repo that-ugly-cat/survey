@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Survey — Two-factor authentication</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: #0f1117;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #e2e8f0;
+    }
+    .card {
+      width: 100%; max-width: 400px; padding: 2.5rem 2rem;
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px;
+    }
+    .brand { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
+    .sub   { font-size: 0.8rem; color: #718096; margin-bottom: 1.5rem; line-height: 1.6; }
+    .qr { text-align: center; margin: 1rem 0; }
+    .qr img { max-width: 200px; border-radius: 8px; background: #fff; padding: 8px; }
+    .manual { font-size: 0.75rem; color: #a0aec0; text-align: center; margin: 0.5rem 0 1rem; }
+    .manual code { background: #0f1117; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.2rem 0.5rem; color: #63b3ed; font-size: 0.8rem; word-break: break-all; }
+    label { display: block; font-size: 0.75rem; color: #a0aec0; margin-bottom: 0.35rem; }
+    input {
+      width: 100%; padding: 0.6rem 0.8rem; background: #0f1117;
+      border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0;
+      font-size: 1.1rem; letter-spacing: 0.25em; text-align: center; outline: none;
+    }
+    input:focus { border-color: #4a6fa5; }
+    button {
+      width: 100%; margin-top: 1.4rem; padding: 0.65rem;
+      background: #0a3c8a; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #0d4fa8; }
+    .flash {
+      margin-top: 1rem; padding: 0.6rem 0.8rem; border-radius: 6px;
+      font-size: 0.82rem; display: none;
+    }
+    .flash.err { background: #2d1515; border: 1px solid #7b2020; color: #fc8181; display: block; }
+    .backup { margin-top: 1.5rem; }
+    .backup h3 { font-size: 0.85rem; color: #f6e05e; margin-bottom: 0.5rem; }
+    .backup p { font-size: 0.78rem; color: #a0aec0; margin-bottom: 0.75rem; line-height: 1.6; }
+    .backup pre {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.9rem; color: #e2e8f0; font-size: 0.9rem; line-height: 1.9;
+      letter-spacing: 0.08em; text-align: center;
+    }
+    .foot { margin-top: 1.5rem; font-size: 0.8rem; color: #718096; text-align: center; }
+    .foot a { color: #63b3ed; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {% if enrolled %}
+    <div class="brand">Two-factor authentication</div>
+    <div class="sub">Enter the 6-digit code from your authenticator app, or a backup code.</div>
+    <form id="verify-form">
+      <label>Authentication code</label>
+      <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" autofocus required>
+      <button type="submit">Verify</button>
+    </form>
+    {% else %}
+    <div class="brand">Set up two-factor auth</div>
+    <div class="sub">
+      Scan this QR with <strong>Ente Auth</strong>, Google Authenticator or any TOTP app,
+      then enter the code it shows. This is required to use your account.
+    </div>
+    <div class="qr" id="qr"></div>
+    <div class="manual">or enter this key manually:<br><code id="secret">…</code></div>
+    <form id="confirm-form">
+      <label>Code from your app</label>
+      <input id="code" inputmode="numeric" placeholder="123456" autofocus required>
+      <button type="submit">Confirm &amp; continue</button>
+    </form>
+    {% endif %}
+
+    <div class="flash" id="flash"></div>
+
+    <div class="backup" id="backup" style="display:none">
+      <h3>Save your backup codes</h3>
+      <p>Each code works once if you lose your device. Store them somewhere safe — they won't be shown again.</p>
+      <pre id="backup-codes"></pre>
+      <button onclick="location.href='/admin'">I've saved them — continue</button>
+    </div>
+
+    <div class="foot"><a href="/logout">Sign out</a></div>
+  </div>
+
+  <script>
+    const flash = document.getElementById('flash');
+    function showErr(msg) { flash.className = 'flash err'; flash.textContent = msg; }
+    async function post(url, body) {
+      const r = await fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Something went wrong');
+      return data;
+    }
+
+    {% if enrolled %}
+    document.getElementById('verify-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await post('/api/2fa/verify', { code: document.getElementById('code').value });
+        location.href = '/admin';
+      } catch (err) { showErr(err.message); }
+    });
+    {% else %}
+    (async () => {
+      try {
+        const r = await post('/api/2fa/setup');
+        document.getElementById('secret').textContent = r.secret;
+        if (r.qr) document.getElementById('qr').innerHTML = '<img alt="QR" src="' + r.qr + '">';
+      } catch (err) { showErr(err.message); }
+    })();
+    document.getElementById('confirm-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const r = await post('/api/2fa/confirm', { code: document.getElementById('code').value });
+        document.getElementById('confirm-form').style.display = 'none';
+        document.getElementById('qr').style.display = 'none';
+        document.querySelector('.manual').style.display = 'none';
+        flash.className = 'flash';
+        document.getElementById('backup-codes').textContent = (r.backup_codes || []).join('\n');
+        document.getElementById('backup').style.display = 'block';
+      } catch (err) { showErr(err.message); }
+    });
+    {% endif %}
+  </script>
+</body>
+</html>

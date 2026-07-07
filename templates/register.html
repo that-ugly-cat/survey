@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Survey — Sign in</title>
+  <title>Survey — Register</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -13,11 +13,11 @@
       color: #e2e8f0;
     }
     .card {
-      width: 100%; max-width: 340px; padding: 2.5rem 2rem;
+      width: 100%; max-width: 360px; padding: 2.5rem 2rem;
       background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px;
     }
     .brand { font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 0.25rem; }
-    .sub   { font-size: 0.78rem; color: #718096; margin-bottom: 2rem; }
+    .sub   { font-size: 0.78rem; color: #718096; margin-bottom: 1.5rem; }
     label  { display: block; font-size: 0.75rem; color: #a0aec0; margin-bottom: 0.35rem; margin-top: 1rem; }
     input  {
       width: 100%; padding: 0.6rem 0.8rem;
@@ -25,6 +25,7 @@
       color: #e2e8f0; font-size: 0.9rem; outline: none; transition: border-color 0.15s;
     }
     input:focus { border-color: #4a6fa5; }
+    .hint { font-size: 0.72rem; color: #4a5568; margin-top: 0.35rem; }
     button {
       width: 100%; margin-top: 1.6rem; padding: 0.65rem;
       background: #0a3c8a; color: #fff; border: none; border-radius: 6px;
@@ -43,17 +44,23 @@
 </head>
 <body>
   <div class="card">
-    <div class="brand">Survey — Sign in</div>
-    <div class="sub">survey.borant.eu</div>
-    {% if error %}<div class="error">Wrong email or password.</div>{% endif %}
-    <form method="post" action="/login">
+    <div class="brand">Create your account</div>
+    <div class="sub">survey.borant.eu — you'll set up two-factor auth next.</div>
+    {% if error == 'email' %}<div class="error">Enter a valid email address.</div>{% endif %}
+    {% if error == 'pwd'   %}<div class="error">Password must be at least 8 characters.</div>{% endif %}
+    {% if error == 'name'  %}<div class="error">Enter your name.</div>{% endif %}
+    {% if error == 'taken' %}<div class="error">That email is already registered.</div>{% endif %}
+    <form method="post" action="/register">
+      <label>Name</label>
+      <input type="text" name="name" autofocus required>
       <label>Email</label>
-      <input type="email" name="email" autofocus required>
+      <input type="email" name="email" required>
       <label>Password</label>
-      <input type="password" name="password" required>
-      <button type="submit">Sign in</button>
+      <input type="password" name="password" minlength="8" required>
+      <div class="hint">At least 8 characters.</div>
+      <button type="submit">Register</button>
     </form>
-    <div class="foot">No account yet? <a href="/register">Register</a></div>
+    <div class="foot">Already registered? <a href="/login">Sign in</a></div>
   </div>
 </body>
 </html>

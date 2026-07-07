@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Survey Admin — Users</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; margin-left: 1.2rem; }
+    header a:hover { color: #a0aec0; }
+    header .whoami { font-size: 0.75rem; color: #4a5568; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    section {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.8rem 2rem; margin-bottom: 1.5rem;
+    }
+    h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #4a5568; margin-bottom: 1.4rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    th {
+      text-align: left; padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #2d3148; color: #4a5568;
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    td { padding: 0.75rem; border-bottom: 1px solid #1e2130; vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #1e2235; }
+    .email { color: #e2e8f0; font-weight: 600; }
+    .muted { color: #4a5568; font-size: 0.78rem; }
+    .badge {
+      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 99px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .badge-on   { background: #0d2e1a; color: #48bb78; border: 1px solid #1a4731; }
+    .badge-off  { background: #2d1515; color: #fc8181; border: 1px solid #7b2020; }
+    .badge-dim  { background: #1a1d27; color: #4a5568; border: 1px solid #2d3148; }
+    .badge-admin{ background: #0f1f3d; color: #63b3ed; border: 1px solid #234; }
+    .actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+    .btn-sm { padding: 0.25rem 0.7rem; border: none; border-radius: 5px;
+      font-size: 0.76rem; font-weight: 600; cursor: pointer; }
+    .btn-toggle { background: #2d3148; color: #a0aec0; }
+    .btn-toggle:hover { background: #363b55; }
+    .btn-warn { background: #2d2410; color: #f6c453; }
+    .btn-warn:hover { background: #3d3016; }
+    .btn-danger { background: #2d1515; color: #fc8181; }
+    .btn-danger:hover { background: #3d1a1a; }
+    .empty { text-align: center; color: #4a5568; padding: 2.5rem 0; font-size: 0.875rem; }
+    .tmp-banner {
+      background: #0d2e1a; border: 1px solid #1a4731; border-radius: 8px;
+      padding: 1rem 1.2rem; margin-bottom: 1.5rem; font-size: 0.85rem; color: #9ae6b4;
+    }
+    .tmp-banner code { background: #0f1117; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.2rem 0.55rem; color: #f6e05e; font-size: 0.95rem; letter-spacing: 0.05em; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey Admin — Users</div>
+    <span class="whoami">{{ user.email }} · admin</span>
+    <a href="/admin">Surveys</a>
+    <a href="/profile">Profile</a>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    {% if tmp_password %}
+    <div class="tmp-banner">
+      Temporary password set for user #{{ tmp_uid }}: <code>{{ tmp_password }}</code><br>
+      Share it over a secure channel — it won't be shown again. The user should change it from their profile after signing in.
+    </div>
+    {% endif %}
+
+    <section>
+      <h2>Registered users</h2>
+      {% if users %}
+      <table>
+        <thead>
+          <tr>
+            <th>Email</th><th>Name</th><th>Surveys</th><th>Status</th><th>2FA</th><th>Joined</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>
+              <span class="email">{{ u.email }}</span>
+              {% if u.is_admin %}<span class="badge badge-admin">admin</span>{% endif %}
+            </td>
+            <td>{{ u.name }}</td>
+            <td>{{ u.survey_count }}</td>
+            <td>
+              {% if u.is_active %}<span class="badge badge-on">Active</span>
+              {% else %}<span class="badge badge-off">Disabled</span>{% endif %}
+            </td>
+            <td>
+              {% if u.totp_enabled %}<span class="badge badge-on">On</span>
+              {% else %}<span class="badge badge-dim">Off</span>{% endif %}
+            </td>
+            <td class="muted">{{ u.created_at[:10] }}</td>
+            <td>
+              <div class="actions">
+                {% if u.id != user.id %}
+                <form method="post" action="/admin/users/{{ u.id }}/toggle-active">
+                  <button class="btn-sm btn-toggle">{{ 'Disable' if u.is_active else 'Enable' }}</button>
+                </form>
+                {% endif %}
+                <form method="post" action="/admin/users/{{ u.id }}/reset-2fa"
+                      onsubmit="return confirm('Reset 2FA for {{ u.email }}? They will re-enroll on next login.')">
+                  <button class="btn-sm btn-warn">Reset 2FA</button>
+                </form>
+                <form method="post" action="/admin/users/{{ u.id }}/reset-password"
+                      onsubmit="return confirm('Generate a new temporary password for {{ u.email }}?')">
+                  <button class="btn-sm btn-danger">Reset password</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="empty">No users yet.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

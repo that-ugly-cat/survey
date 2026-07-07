@@ -5,6 +5,7 @@ import json
 import os
 import random
 import re
+import secrets
 import shutil
 import sqlite3
 
@@ -12,17 +13,22 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from itsdangerous import BadSignature, URLSafeSerializer
+
+import auth
+import crypto
+import totp
 
 DB_PATH = os.getenv("DB_PATH", "/data/survey.db")
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 UPLOADS_PATH = os.getenv("UPLOADS_PATH", "/data/uploads")
+
+# Bootstrap admin — created once on first run, then owns any pre-existing surveys.
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@survey.local").strip().lower()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf"}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-signer = URLSafeSerializer(SECRET_KEY)
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
@@ -39,6 +45,18 @@ def get_db():
 def init_db():
     db = get_db()
     db.executescript("""
+        CREATE TABLE IF NOT EXISTS users (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            email                 TEXT UNIQUE NOT NULL,
+            name                  TEXT NOT NULL,
+            hashed_password       TEXT NOT NULL,
+            totp_secret_encrypted TEXT,
+            totp_enabled          INTEGER NOT NULL DEFAULT 0,
+            backup_codes_json     TEXT,
+            is_admin              INTEGER NOT NULL DEFAULT 0,
+            is_active             INTEGER NOT NULL DEFAULT 1,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         CREATE TABLE IF NOT EXISTS surveys (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             slug        TEXT UNIQUE NOT NULL,
@@ -54,6 +72,11 @@ def init_db():
             submitted_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
+    # per-user ownership: additive migration (older DBs predate this column)
+    survey_cols = {r[1] for r in db.execute("PRAGMA table_info(surveys)").fetchall()}
+    if "owner_id" not in survey_cols:
+        db.execute("ALTER TABLE surveys ADD COLUMN owner_id INTEGER REFERENCES users(id)")
+
     # migrate single-pool schema to multi-pool if needed
     has_rand_pools = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='rand_pools'"
@@ -85,7 +108,25 @@ def init_db():
     if "condition_map" not in cols:
         db.execute("ALTER TABLE rand_pools ADD COLUMN condition_map TEXT NULL")
     db.commit()
+
+    _bootstrap_admin(db)
     db.close()
+
+
+def _bootstrap_admin(db):
+    """Create the bootstrap admin on first run and hand it any orphan surveys.
+    The admin still has to enrol in 2FA on first login (totp_enabled = 0)."""
+    admin = db.execute("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").fetchone()
+    if not admin:
+        db.execute(
+            "INSERT INTO users (email, name, hashed_password, is_admin) VALUES (?, ?, ?, 1)",
+            (ADMIN_EMAIL, "Admin", auth.hash_password(ADMIN_PASSWORD)),
+        )
+        db.commit()
+        admin = db.execute("SELECT id FROM users WHERE is_admin = 1 ORDER BY id LIMIT 1").fetchone()
+    # assign surveys that predate multi-user to the admin
+    db.execute("UPDATE surveys SET owner_id = ? WHERE owner_id IS NULL", (admin["id"],))
+    db.commit()
 
 
 @app.on_event("startup")
@@ -98,15 +139,14 @@ def startup():
 
 # --- auth helpers ---
 
-def check_admin(request: Request) -> bool:
-    token = request.cookies.get("session")
-    if not token:
-        return False
-    try:
-        signer.loads(token)
-        return True
-    except BadSignature:
-        return False
+def _owned_survey(db, slug: str, user):
+    """The survey row if `user` may manage it (owner or admin), else None."""
+    row = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not row:
+        return None
+    if user["is_admin"] or row["owner_id"] == user["id"]:
+        return row
+    return None
 
 
 # --- auth routes ---
@@ -117,12 +157,50 @@ async def login_page(request: Request, error: int = 0):
 
 
 @app.post("/login")
-async def login(password: str = Form(...)):
-    if password != ADMIN_PASSWORD:
+async def login(email: str = Form(...), password: str = Form(...)):
+    db = get_db()
+    user = db.execute(
+        "SELECT * FROM users WHERE email = ? AND is_active = 1", (email.strip().lower(),)
+    ).fetchone()
+    db.close()
+    if not user or not auth.verify_password(password, user["hashed_password"]):
         return RedirectResponse("/login?error=1", status_code=302)
-    token = signer.dumps("admin")
-    response = RedirectResponse("/admin", status_code=302)
-    response.set_cookie("session", token, httponly=True, max_age=86400 * 7, samesite="lax")
+    # password ok → pending session; full access only after the 2FA step
+    response = RedirectResponse("/2fa", status_code=302)
+    auth.set_session(response, user["id"], "pending_2fa")
+    return response
+
+
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, error: str = ""):
+    return templates.TemplateResponse("register.html", {"request": request, "error": error})
+
+
+@app.post("/register")
+async def register(name: str = Form(...), email: str = Form(...), password: str = Form(...)):
+    email = email.strip().lower()
+    name = name.strip()
+    if not EMAIL_RE.match(email):
+        return RedirectResponse("/register?error=email", status_code=302)
+    if len(password) < 8:
+        return RedirectResponse("/register?error=pwd", status_code=302)
+    if not name:
+        return RedirectResponse("/register?error=name", status_code=302)
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO users (email, name, hashed_password) VALUES (?, ?, ?)",
+            (email, name, auth.hash_password(password)),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        db.close()
+        return RedirectResponse("/register?error=taken", status_code=302)
+    user_id = db.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()["id"]
+    db.close()
+    # accounts are active immediately, but 2FA enrolment is mandatory before use
+    response = RedirectResponse("/2fa", status_code=302)
+    auth.set_session(response, user_id, "pending_2fa")
     return response
 
 
@@ -130,6 +208,94 @@ async def login(password: str = Form(...)):
 async def logout():
     response = RedirectResponse("/login", status_code=302)
     response.delete_cookie("session")
+    return response
+
+
+# --- two-factor (TOTP, mandatory) ---
+
+@app.get("/2fa", response_class=HTMLResponse)
+async def twofa_page(request: Request):
+    db = get_db()
+    if auth.current_user(request, db):   # already fully authenticated
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    user = auth.pending_user(request, db)
+    db.close()
+    if not user:                         # no pending session → back to login
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("twofa.html", {
+        "request": request,
+        "enrolled": bool(user["totp_enabled"]),
+        "email": user["email"],
+    })
+
+
+@app.post("/api/2fa/setup")
+async def api_2fa_setup(request: Request):
+    """Generate a secret + QR for enrolment (does not enable 2FA until confirmed)."""
+    db = get_db()
+    user = auth.pending_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "session expired"}, status_code=401)
+    secret = totp.generate_secret()
+    db.execute("UPDATE users SET totp_secret_encrypted = ? WHERE id = ?",
+               (crypto.encrypt(secret), user["id"]))
+    db.commit()
+    db.close()
+    uri = totp.provisioning_uri(secret, user["email"])
+    return JSONResponse({"secret": secret, "uri": uri, "qr": totp.qr_data_uri(uri)})
+
+
+@app.post("/api/2fa/confirm")
+async def api_2fa_confirm(request: Request):
+    db = get_db()
+    user = auth.pending_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "session expired"}, status_code=401)
+    if not user["totp_secret_encrypted"]:
+        db.close()
+        return JSONResponse({"error": "start the setup first"}, status_code=400)
+    body = await request.json()
+    if not totp.verify(crypto.decrypt(user["totp_secret_encrypted"]), body.get("code", "")):
+        db.close()
+        return JSONResponse({"error": "Invalid code — check your authenticator app"}, status_code=400)
+    plain, hashes = totp.generate_backup_codes()
+    db.execute("UPDATE users SET totp_enabled = 1, backup_codes_json = ? WHERE id = ?",
+               (json.dumps(hashes), user["id"]))
+    db.commit()
+    db.close()
+    response = JSONResponse({"ok": True, "backup_codes": plain})
+    auth.set_session(response, user["id"], "full")
+    return response
+
+
+@app.post("/api/2fa/verify")
+async def api_2fa_verify(request: Request):
+    db = get_db()
+    user = auth.pending_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "session expired"}, status_code=401)
+    if not (user["totp_enabled"] and user["totp_secret_encrypted"]):
+        db.close()
+        return JSONResponse({"error": "2FA is not configured"}, status_code=400)
+    body = await request.json()
+    code = body.get("code", "")
+    ok = totp.verify(crypto.decrypt(user["totp_secret_encrypted"]), code)
+    if not ok:  # fall back to a one-time backup code
+        remaining = totp.consume_backup_code(code, json.loads(user["backup_codes_json"] or "[]"))
+        if remaining is not None:
+            db.execute("UPDATE users SET backup_codes_json = ? WHERE id = ?",
+                       (json.dumps(remaining), user["id"]))
+            db.commit()
+            ok = True
+    db.close()
+    if not ok:
+        return JSONResponse({"error": "Invalid code"}, status_code=400)
+    response = JSONResponse({"ok": True})
+    auth.set_session(response, user["id"], "full")
     return response
 
 
@@ -159,11 +325,14 @@ def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> list:
 
 # --- public routes ---
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
-    if check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    db.close()
+    if user:
         return RedirectResponse("/admin", status_code=302)
-    return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("landing.html", {"request": request})
 
 
 @app.get("/s/{slug}", response_class=HTMLResponse)
@@ -242,18 +411,33 @@ async def submit(slug: str, request: Request):
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_home(request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    surveys = db.execute("""
-        SELECT s.*, COUNT(r.id) AS response_count
-        FROM surveys s
-        LEFT JOIN responses r ON r.survey_id = s.id
-        GROUP BY s.id
-        ORDER BY s.created_at DESC
-    """).fetchall()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if user["is_admin"]:
+        surveys = db.execute("""
+            SELECT s.*, COUNT(r.id) AS response_count, u.email AS owner_email
+            FROM surveys s
+            LEFT JOIN responses r ON r.survey_id = s.id
+            LEFT JOIN users u ON u.id = s.owner_id
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+        """).fetchall()
+    else:
+        surveys = db.execute("""
+            SELECT s.*, COUNT(r.id) AS response_count, NULL AS owner_email
+            FROM surveys s
+            LEFT JOIN responses r ON r.survey_id = s.id
+            WHERE s.owner_id = ?
+            GROUP BY s.id
+            ORDER BY s.created_at DESC
+        """, (user["id"],)).fetchall()
     db.close()
-    return templates.TemplateResponse("admin.html", {"request": request, "surveys": surveys})
+    return templates.TemplateResponse("admin.html", {
+        "request": request, "surveys": surveys, "user": user,
+    })
 
 
 @app.post("/admin/surveys")
@@ -264,7 +448,10 @@ async def create_survey(
     schema_file: UploadFile = File(None),
     schema_text: str = Form(""),
 ):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
 
     if schema_file and schema_file.filename:
@@ -273,20 +460,21 @@ async def create_survey(
     elif schema_text.strip():
         schema_str = schema_text.strip()
     else:
+        db.close()
         return RedirectResponse("/admin?error=no_schema", status_code=302)
 
     try:
         json.loads(schema_str)
     except json.JSONDecodeError:
+        db.close()
         return RedirectResponse("/admin?error=invalid_json", status_code=302)
 
     slug = slug.strip().lower().replace(" ", "-")
 
-    db = get_db()
     try:
         db.execute(
-            "INSERT INTO surveys (slug, title, schema_json) VALUES (?, ?, ?)",
-            (slug, title, schema_str),
+            "INSERT INTO surveys (slug, title, schema_json, owner_id) VALUES (?, ?, ?, ?)",
+            (slug, title, schema_str, user["id"]),
         )
         db.commit()
     except sqlite3.IntegrityError:
@@ -298,10 +486,12 @@ async def create_survey(
 
 @app.get("/admin/surveys/{slug}/edit", response_class=HTMLResponse)
 async def edit_survey_page(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    row = db.execute("SELECT title, schema_json FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
     db.close()
     if not row:
         return RedirectResponse("/admin", status_code=302)
@@ -321,8 +511,14 @@ async def edit_survey(
     schema_file: UploadFile = File(None),
     schema_text: str = Form(""),
 ):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
+    if not _owned_survey(db, slug, user):
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
 
     if schema_file and schema_file.filename:
         raw = await schema_file.read()
@@ -330,14 +526,15 @@ async def edit_survey(
     elif schema_text.strip():
         schema_str = schema_text.strip()
     else:
+        db.close()
         return RedirectResponse(f"/admin/surveys/{slug}/edit?error=no_schema", status_code=302)
 
     try:
         json.loads(schema_str)
     except json.JSONDecodeError:
+        db.close()
         return RedirectResponse(f"/admin/surveys/{slug}/edit?error=invalid_json", status_code=302)
 
-    db = get_db()
     db.execute(
         "UPDATE surveys SET title = ?, schema_json = ? WHERE slug = ?",
         (title, schema_str, slug),
@@ -349,24 +546,30 @@ async def edit_survey(
 
 @app.post("/admin/surveys/{slug}/toggle")
 async def toggle_survey(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    db.execute("UPDATE surveys SET active = 1 - active WHERE slug = ?", (slug,))
-    db.commit()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _owned_survey(db, slug, user):
+        db.execute("UPDATE surveys SET active = 1 - active WHERE slug = ?", (slug,))
+        db.commit()
     db.close()
     return RedirectResponse("/admin", status_code=302)
 
 
 @app.post("/admin/surveys/{slug}/delete")
 async def delete_survey(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    db.execute("DELETE FROM surveys WHERE slug = ?", (slug,))
-    db.commit()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _owned_survey(db, slug, user):
+        db.execute("DELETE FROM surveys WHERE slug = ?", (slug,))
+        db.commit()
+        shutil.rmtree(os.path.join(UPLOADS_PATH, slug), ignore_errors=True)
     db.close()
-    shutil.rmtree(os.path.join(UPLOADS_PATH, slug), ignore_errors=True)
     return RedirectResponse("/admin", status_code=302)
 
 
@@ -374,10 +577,12 @@ async def delete_survey(slug: str, request: Request):
 
 @app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
 async def randomization_page(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    survey = db.execute("SELECT id, title, schema_json FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _owned_survey(db, slug, user)
     if not survey:
         db.close()
         return RedirectResponse("/admin", status_code=302)
@@ -415,10 +620,12 @@ async def randomization_page(slug: str, request: Request):
 
 @app.post("/admin/surveys/{slug}/randomization/add-pool")
 async def add_pool(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    row = db.execute("SELECT id FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
     if row:
         order = db.execute(
             "SELECT COALESCE(MAX(pool_order)+1, 0) FROM rand_pools WHERE survey_id = ?", (row["id"],)
@@ -432,10 +639,24 @@ async def add_pool(slug: str, request: Request):
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
 
 
+def _pool_belongs(db, slug: str, pool_id: int, user) -> bool:
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        return False
+    row = db.execute("SELECT survey_id FROM rand_pools WHERE id = ?", (pool_id,)).fetchone()
+    return bool(row and row["survey_id"] == survey["id"])
+
+
 @app.post("/admin/surveys/{slug}/randomization/{pool_id}/save")
 async def save_pool(slug: str, pool_id: int, request: Request):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
+    if not _pool_belongs(db, slug, pool_id, user):
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
     form = await request.form()
     pool_pages = form.getlist("pool_pages")
     pool_name = form.get("pool_name", "Pool").strip() or "Pool"
@@ -454,7 +675,6 @@ async def save_pool(slug: str, pool_id: int, request: Request):
                 condition_map = cmap_raw
             except json.JSONDecodeError:
                 pass  # silently discard invalid JSON
-    db = get_db()
     db.execute(
         "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, condition_var = ?, condition_map = ? WHERE id = ?",
         (pool_name, json.dumps(pool_pages), show_count, condition_var, condition_map, pool_id),
@@ -467,22 +687,28 @@ async def save_pool(slug: str, pool_id: int, request: Request):
 
 @app.post("/admin/surveys/{slug}/randomization/{pool_id}/delete")
 async def delete_pool(slug: str, pool_id: int, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    db.execute("DELETE FROM rand_pools WHERE id = ?", (pool_id,))
-    db.commit()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _pool_belongs(db, slug, pool_id, user):
+        db.execute("DELETE FROM rand_pools WHERE id = ?", (pool_id,))
+        db.commit()
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
 
 
 @app.post("/admin/surveys/{slug}/randomization/{pool_id}/reset")
 async def reset_pool_counts(slug: str, pool_id: int, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
-    db.commit()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _pool_belongs(db, slug, pool_id, user):
+        db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
+        db.commit()
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
 
@@ -503,10 +729,12 @@ def _upload_dir(slug: str) -> str:
 
 @app.get("/admin/surveys/{slug}/files", response_class=HTMLResponse)
 async def files_page(slug: str, request: Request):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    row = db.execute("SELECT title FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
     db.close()
     if not row:
         return RedirectResponse("/admin", status_code=302)
@@ -522,12 +750,14 @@ async def files_page(slug: str, request: Request):
 
 @app.post("/admin/surveys/{slug}/upload")
 async def upload_file(slug: str, request: Request, file: UploadFile = File(...)):
-    if not check_admin(request):
-        return RedirectResponse("/login", status_code=302)
     db = get_db()
-    exists = db.execute("SELECT 1 FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    owned = _owned_survey(db, slug, user)
     db.close()
-    if not exists:
+    if not owned:
         return RedirectResponse("/admin", status_code=302)
 
     ext = os.path.splitext(file.filename)[1].lower()
@@ -547,8 +777,15 @@ async def upload_file(slug: str, request: Request, file: UploadFile = File(...))
 
 @app.post("/admin/surveys/{slug}/files/{filename}/delete")
 async def delete_file(slug: str, filename: str, request: Request):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
+    owned = _owned_survey(db, slug, user)
+    db.close()
+    if not owned:
+        return RedirectResponse("/admin", status_code=302)
     safe = _safe_filename(filename)
     path = os.path.join(UPLOADS_PATH, slug, safe)
     if os.path.isfile(path):
@@ -571,25 +808,28 @@ def _flatten(data: dict, prefix: str = "") -> dict:
     return result
 
 
-def _get_responses(slug: str):
-    db = get_db()
+def _get_responses(db, slug: str):
     row = db.execute("SELECT id FROM surveys WHERE slug = ?", (slug,)).fetchone()
     if not row:
-        db.close()
-        return None, None
-    rows = db.execute(
+        return None
+    return db.execute(
         "SELECT response_json, submitted_at FROM responses WHERE survey_id = ? ORDER BY submitted_at",
         (row["id"],),
     ).fetchall()
-    db.close()
-    return slug, rows
 
 
 @app.get("/admin/surveys/{slug}/export.csv")
 async def export_csv(slug: str, request: Request):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
-    _, rows = _get_responses(slug)
+    if not _owned_survey(db, slug, user):
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    rows = _get_responses(db, slug)
+    db.close()
     if rows is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     if not rows:
@@ -624,9 +864,16 @@ async def export_csv(slug: str, request: Request):
 
 @app.get("/admin/surveys/{slug}/export.json")
 async def export_json(slug: str, request: Request):
-    if not check_admin(request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
         return RedirectResponse("/login", status_code=302)
-    _, rows = _get_responses(slug)
+    if not _owned_survey(db, slug, user):
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    rows = _get_responses(db, slug)
+    db.close()
     if rows is None:
         return JSONResponse({"error": "not found"}, status_code=404)
 
@@ -639,3 +886,140 @@ async def export_json(slug: str, request: Request):
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{slug}.json"'},
     )
+
+
+# --- profile (self-service) ---
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request, ok: str = "", error: str = ""):
+    db = get_db()
+    user = auth.current_user(request, db)
+    db.close()
+    if not user:
+        return RedirectResponse("/login", status_code=302)
+    return templates.TemplateResponse("profile.html", {
+        "request": request, "user": user, "ok": ok, "error": error,
+    })
+
+
+@app.post("/profile/password")
+async def profile_password(
+    request: Request,
+    current: str = Form(...),
+    new_password: str = Form(...),
+):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if not auth.verify_password(current, user["hashed_password"]):
+        db.close()
+        return RedirectResponse("/profile?error=current", status_code=302)
+    if len(new_password) < 8:
+        db.close()
+        return RedirectResponse("/profile?error=short", status_code=302)
+    db.execute("UPDATE users SET hashed_password = ? WHERE id = ?",
+               (auth.hash_password(new_password), user["id"]))
+    db.commit()
+    db.close()
+    return RedirectResponse("/profile?ok=password", status_code=302)
+
+
+@app.post("/api/profile/backup-codes")
+async def regenerate_backup_codes(request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    if not user["totp_enabled"]:
+        db.close()
+        return JSONResponse({"error": "2FA not enabled"}, status_code=400)
+    plain, hashes = totp.generate_backup_codes()
+    db.execute("UPDATE users SET backup_codes_json = ? WHERE id = ?",
+               (json.dumps(hashes), user["id"]))
+    db.commit()
+    db.close()
+    return JSONResponse({"backup_codes": plain})
+
+
+# --- admin: user management ---
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users(request: Request, tmp_uid: int = 0, tmp_password: str = ""):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user or not user["is_admin"]:
+        db.close()
+        return RedirectResponse("/admin" if user else "/login", status_code=302)
+    users = db.execute("""
+        SELECT u.*, COUNT(s.id) AS survey_count
+        FROM users u
+        LEFT JOIN surveys s ON s.owner_id = u.id
+        GROUP BY u.id
+        ORDER BY u.created_at
+    """).fetchall()
+    db.close()
+    return templates.TemplateResponse("admin_users.html", {
+        "request": request, "user": user, "users": users,
+        "tmp_uid": tmp_uid, "tmp_password": tmp_password,
+    })
+
+
+def _admin_or_none(request, db):
+    user = auth.current_user(request, db)
+    if not user or not user["is_admin"]:
+        return None
+    return user
+
+
+@app.post("/admin/users/{uid}/toggle-active")
+async def admin_toggle_active(uid: int, request: Request):
+    db = get_db()
+    admin = _admin_or_none(request, db)
+    if not admin:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if uid != admin["id"]:  # never lock yourself out
+        db.execute("UPDATE users SET is_active = 1 - is_active WHERE id = ?", (uid,))
+        db.commit()
+    db.close()
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.post("/admin/users/{uid}/reset-2fa")
+async def admin_reset_2fa(uid: int, request: Request):
+    """Clear a user's 2FA so they re-enrol on next login (lost-device recovery)."""
+    db = get_db()
+    admin = _admin_or_none(request, db)
+    if not admin:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    db.execute(
+        "UPDATE users SET totp_enabled = 0, totp_secret_encrypted = NULL, backup_codes_json = NULL WHERE id = ?",
+        (uid,),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse("/admin/users", status_code=302)
+
+
+@app.post("/admin/users/{uid}/reset-password")
+async def admin_reset_password(uid: int, request: Request):
+    """Set a fresh temporary password, shown once to the admin to hand over."""
+    db = get_db()
+    admin = _admin_or_none(request, db)
+    if not admin:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    target = db.execute("SELECT id FROM users WHERE id = ?", (uid,)).fetchone()
+    if not target:
+        db.close()
+        return RedirectResponse("/admin/users", status_code=302)
+    temp = secrets.token_urlsafe(9)
+    db.execute("UPDATE users SET hashed_password = ? WHERE id = ?",
+               (auth.hash_password(temp), uid))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/users?tmp_uid={uid}&tmp_password={temp}", status_code=302)

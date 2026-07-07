@@ -15,8 +15,9 @@
       display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
     }
     header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
-    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; margin-left: 1.2rem; }
     header a:hover { color: #a0aec0; }
+    header .whoami { font-size: 0.75rem; color: #4a5568; }
     main { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
     section {
       background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
@@ -116,6 +117,9 @@
 <body>
   <header>
     <div class="brand">Survey Admin</div>
+    <span class="whoami">{{ user.email }}{% if user.is_admin %} · admin{% endif %}</span>
+    {% if user.is_admin %}<a href="/admin/users">Users</a>{% endif %}
+    <a href="/profile">Profile</a>
     <a href="/logout">Sign out</a>
   </header>
 
@@ -168,13 +172,14 @@
       <table>
         <thead>
           <tr>
-            <th>Title</th><th>URL</th><th>Status</th><th>Responses</th><th>Created</th><th>Actions</th>
+            <th>Title</th>{% if user.is_admin %}<th>Owner</th>{% endif %}<th>URL</th><th>Status</th><th>Responses</th><th>Created</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {% for s in surveys %}
           <tr>
             <td>{{ s.title }}</td>
+            {% if user.is_admin %}<td class="date">{{ s.owner_email or '—' }}</td>{% endif %}
             <td><a class="slug-link" href="/s/{{ s.slug }}" target="_blank">/s/{{ s.slug }}</a></td>
             <td><span class="badge {{ 'badge-open' if s.active else 'badge-closed' }}">{{ 'Open' if s.active else 'Closed' }}</span></td>
             <td class="count">{{ s.response_count }}</td>

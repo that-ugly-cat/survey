@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Survey — Profile</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; margin-left: 1.2rem; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 520px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    section {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.8rem 2rem; margin-bottom: 1.5rem;
+    }
+    h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #4a5568; margin-bottom: 1.2rem; }
+    .row { font-size: 0.85rem; color: #a0aec0; margin-bottom: 0.5rem; }
+    .row strong { color: #e2e8f0; }
+    label { display: block; font-size: 0.75rem; color: #a0aec0; margin: 1rem 0 0.35rem; }
+    input {
+      width: 100%; padding: 0.55rem 0.8rem; background: #0f1117;
+      border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0;
+      font-size: 0.9rem; outline: none;
+    }
+    input:focus { border-color: #4a6fa5; }
+    button {
+      margin-top: 1.2rem; padding: 0.55rem 1.4rem;
+      background: #0a3c8a; color: #fff; border: none; border-radius: 6px;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
+    }
+    button:hover { background: #0d4fa8; }
+    .btn-alt { background: #2d3148; color: #a0aec0; }
+    .btn-alt:hover { background: #363b55; }
+    .flash { padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.82rem; margin-bottom: 1rem; }
+    .flash.ok  { background: #0d2e1a; border: 1px solid #1a4731; color: #9ae6b4; }
+    .flash.err { background: #2d1515; border: 1px solid #7b2020; color: #fc8181; }
+    pre.codes {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px; margin-top: 1rem;
+      padding: 0.9rem; color: #e2e8f0; font-size: 0.9rem; line-height: 1.9;
+      letter-spacing: 0.08em; text-align: center; display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey — Profile</div>
+    <a href="/admin">Surveys</a>
+    {% if user.is_admin %}<a href="/admin/users">Users</a>{% endif %}
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    {% if ok == 'password' %}<div class="flash ok">Password updated.</div>{% endif %}
+    {% if error == 'current' %}<div class="flash err">Current password is wrong.</div>{% endif %}
+    {% if error == 'short' %}<div class="flash err">New password must be at least 8 characters.</div>{% endif %}
+
+    <section>
+      <h2>Account</h2>
+      <div class="row"><strong>{{ user.name }}</strong></div>
+      <div class="row">{{ user.email }}{% if user.is_admin %} · admin{% endif %}</div>
+      <div class="row">Two-factor: <strong>{{ 'enabled' if user.totp_enabled else 'not enabled' }}</strong></div>
+    </section>
+
+    <section>
+      <h2>Change password</h2>
+      <form method="post" action="/profile/password">
+        <label>Current password</label>
+        <input type="password" name="current" required>
+        <label>New password</label>
+        <input type="password" name="new_password" minlength="8" required>
+        <button type="submit">Update password</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Backup codes</h2>
+      <div class="row">Regenerate your one-time 2FA backup codes. This invalidates any previous set.</div>
+      <button class="btn-alt" id="regen" {% if not user.totp_enabled %}disabled{% endif %}>Regenerate backup codes</button>
+      <pre class="codes" id="codes"></pre>
+    </section>
+  </main>
+
+  <script>
+    const btn = document.getElementById('regen');
+    if (btn) btn.addEventListener('click', async () => {
+      if (!confirm('Regenerate backup codes? Old codes stop working.')) return;
+      const r = await fetch('/api/profile/backup-codes', { method: 'POST' });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        const pre = document.getElementById('codes');
+        pre.textContent = (data.backup_codes || []).join('\n');
+        pre.style.display = 'block';
+      } else {
+        alert(data.error || 'Failed');
+      }
+    });
+  </script>
+</body>
+</html>
