@@ -112,6 +112,30 @@
       text-decoration: none; vertical-align: middle;
     }
     .btn-builder:hover { border-color: #4a6fa5; color: #63b3ed; }
+    .title-link { color: #e2e8f0; font-weight: 600; text-decoration: none; }
+    .title-link:hover { color: #63b3ed; }
+    details.export-dd { position: relative; display: inline-block; }
+    details.export-dd summary {
+      list-style: none; cursor: pointer; display: inline-block;
+      padding: 0.25rem 0.7rem; border-radius: 5px;
+      background: #0f1f3d; color: #4a6fa5; font-size: 0.76rem; font-weight: 600;
+    }
+    details.export-dd summary::-webkit-details-marker { display: none; }
+    details.export-dd summary:hover { background: #132a54; color: #63b3ed; }
+    .dd-menu {
+      position: absolute; top: calc(100% + 4px); right: 0; z-index: 50;
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px;
+      min-width: 160px; padding: 0.4rem; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    .dd-menu a {
+      display: block; padding: 0.35rem 0.6rem; border-radius: 5px;
+      color: #a0aec0; text-decoration: none; font-size: 0.78rem;
+    }
+    .dd-menu a:hover { background: #22263a; color: #e2e8f0; }
+    .dd-label {
+      font-size: 0.62rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #4a5568; padding: 0.35rem 0.6rem 0.15rem;
+    }
   </style>
 </head>
 <body>
@@ -178,7 +202,7 @@
         <tbody>
           {% for s in surveys %}
           <tr>
-            <td>{{ s.title }}</td>
+            <td><a class="title-link" href="/admin/surveys/{{ s.slug }}">{{ s.title }}</a></td>
             {% if user.is_admin %}<td class="date">{{ s.owner_email or '—' }}</td>{% endif %}
             <td><a class="slug-link" href="/s/{{ s.slug }}" target="_blank">/s/{{ s.slug }}</a></td>
             <td><span class="badge {{ 'badge-open' if s.active else 'badge-closed' }}">{{ 'Open' if s.active else 'Closed' }}</span></td>
@@ -189,15 +213,24 @@
                 <form method="post" action="/admin/surveys/{{ s.slug }}/toggle">
                   <button class="btn-sm btn-toggle">{{ 'Close' if s.active else 'Reopen' }}</button>
                 </form>
-                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/edit">Edit</a>
-                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/randomization">Randomize</a>
-                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/files">Files</a>
-                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/export.csv">CSV</a>
-                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}/export.json">JSON</a>
+                <details class="export-dd">
+                  <summary>Export ▾</summary>
+                  <div class="dd-menu">
+                    <div class="dd-label">Responses</div>
+                    <a href="/admin/surveys/{{ s.slug }}/export.csv">CSV</a>
+                    <a href="/admin/surveys/{{ s.slug }}/export.xlsx">Excel</a>
+                    <a href="/admin/surveys/{{ s.slug }}/export.json">JSON</a>
+                    <div class="dd-label">Questionnaire</div>
+                    <a href="/admin/surveys/{{ s.slug }}/review.docx">Review DOCX</a>
+                  </div>
+                </details>
+                <a class="btn-sm btn-export" href="/admin/surveys/{{ s.slug }}">Manage</a>
+                {% if s.response_count == 0 %}
                 <form method="post" action="/admin/surveys/{{ s.slug }}/delete"
-                      onsubmit="return confirm('Delete survey and all {{ s.response_count }} responses?')">
+                      onsubmit="return confirm('Delete empty survey “{{ s.title }}”?')">
                   <button class="btn-sm btn-danger">Delete</button>
                 </form>
+                {% endif %}
               </div>
             </td>
           </tr>
@@ -209,5 +242,14 @@
       {% endif %}
     </section>
   </main>
+
+  <script>
+    // only one Export menu open at a time; any outside click closes them
+    document.addEventListener('click', function(e) {
+      document.querySelectorAll('details.export-dd[open]').forEach(function(d) {
+        if (!d.contains(e.target)) d.removeAttribute('open');
+      });
+    });
+  </script>
 </body>
 </html>

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manage — {{ title }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header .sub   { font-size: 0.78rem; color: #718096; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    section {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1.8rem 2rem; margin-bottom: 1.5rem;
+    }
+    h1 { font-size: 1.25rem; font-weight: 700; color: #fff; }
+    h2 { font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+         letter-spacing: 0.08em; color: #4a5568; margin-bottom: 1.4rem; }
+
+    .overview { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .overview h1 { flex: 1; min-width: 200px; }
+    .badge {
+      display: inline-block; padding: 0.15rem 0.6rem; border-radius: 99px;
+      font-size: 0.72rem; font-weight: 600;
+    }
+    .badge-open   { background: #0d2e1a; color: #48bb78; border: 1px solid #1a4731; }
+    .badge-closed { background: #1a1d27; color: #4a5568; border: 1px solid #2d3148; }
+    .stat-row { display: flex; gap: 2.2rem; flex-wrap: wrap; margin-top: 1.2rem; }
+    .stat .k { font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+               letter-spacing: 0.06em; color: #4a5568; margin-bottom: 0.25rem; }
+    .stat .v { font-size: 0.95rem; font-weight: 600; color: #e2e8f0; }
+    .stat .v.dim { color: #718096; font-weight: 400; }
+
+    .share-row { display: flex; gap: 1.6rem; align-items: center; flex-wrap: wrap; }
+    .share-main { flex: 1; min-width: 260px; }
+    .url-box {
+      display: flex; gap: 0.6rem; align-items: center;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.55rem 0.8rem;
+    }
+    .url-box code { font-family: monospace; font-size: 0.82rem; color: #63b3ed;
+                    flex: 1; overflow-wrap: anywhere; }
+    .qr-wrap { text-align: center; }
+    .qr-wrap img { width: 120px; height: 120px; border-radius: 6px; background: #fff; padding: 4px; }
+    .qr-wrap .hint { margin-top: 0.35rem; }
+
+    .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .btn {
+      display: inline-block; padding: 0.5rem 1.1rem; border: none; border-radius: 6px;
+      font-size: 0.84rem; font-weight: 600; cursor: pointer; text-decoration: none;
+    }
+    .btn-blue { background: #0f1f3d; color: #4a6fa5; }
+    .btn-blue:hover { background: #132a54; color: #63b3ed; }
+    .btn-primary { background: #0a3c8a; color: #fff; }
+    .btn-primary:hover { background: #0d4fa8; }
+    .btn-danger { background: #2d1515; color: #fc8181; }
+    .btn-danger:hover { background: #3d1a1a; }
+    .btn-sm { padding: 0.3rem 0.8rem; font-size: 0.76rem; }
+
+    .hint { font-size: 0.72rem; color: #4a5568; }
+    .mt { margin-top: 0.8rem; }
+
+    .lang-chip {
+      display: inline-block; padding: 0.15rem 0.55rem; border-radius: 99px;
+      background: #0f1f3d; color: #4a6fa5; border: 1px solid #2d3148;
+      font-size: 0.72rem; font-weight: 700; margin-right: 0.3rem;
+    }
+    .config-item { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.8rem; }
+    .config-item:last-child { margin-bottom: 0; }
+    .config-desc { font-size: 0.8rem; color: #718096; }
+
+    section.danger { border-color: #7b2020; }
+    section.danger h2 { color: #fc8181; }
+    .danger-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .danger-text { flex: 1; min-width: 240px; font-size: 0.82rem; color: #a0aec0; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey Admin</div>
+    <span class="sub">{{ title }}</span>
+    <a href="/admin">← All surveys</a>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    <section>
+      <div class="overview">
+        <h1>{{ title }}</h1>
+        <span class="badge {{ 'badge-open' if active else 'badge-closed' }}">{{ 'Open' if active else 'Closed' }}</span>
+      </div>
+      <div class="stat-row">
+        <div class="stat"><div class="k">Responses</div><div class="v">{{ response_count }}</div></div>
+        <div class="stat"><div class="k">Last response</div>
+          <div class="v {{ 'dim' if not last_response }}">{{ last_response[:16].replace('T', ' ') if last_response else '—' }}</div></div>
+        <div class="stat"><div class="k">Created</div><div class="v dim">{{ created_at[:10] }}</div></div>
+        {% if user.is_admin and owner_email %}
+        <div class="stat"><div class="k">Owner</div><div class="v dim">{{ owner_email }}</div></div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section>
+      <h2>Share</h2>
+      <div class="share-row">
+        <div class="share-main">
+          <div class="url-box">
+            <code id="public-url">{{ public_url }}</code>
+            <button class="btn btn-blue btn-sm" onclick="copyUrl()">Copy</button>
+          </div>
+          <p class="hint mt">This is the link participants use. It works while the survey is open.</p>
+        </div>
+        {% if qr %}
+        <div class="qr-wrap">
+          <img src="{{ qr }}" alt="QR code for {{ public_url }}">
+          <p class="hint">Right-click to save — for slides and posters.</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+    <section>
+      <h2>Data — {{ response_count }} response{{ '' if response_count == 1 else 's' }}</h2>
+      <div class="btn-row">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export.csv">CSV</a>
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export.xlsx">Excel</a>
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export.json">JSON</a>
+      </div>
+      <p class="hint mt">CSV and Excel share the same columns; Excel adds a frozen header, filters, and native number types.</p>
+    </section>
+
+    <section>
+      <h2>Questionnaire</h2>
+      <div class="btn-row">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/edit">Edit schema</a>
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/review.docx">Review DOCX</a>
+        <span>
+          {% for l in langs %}<span class="lang-chip">{{ l.upper() }}</span>{% endfor %}
+        </span>
+      </div>
+      <p class="hint mt">Review DOCX renders the questionnaire as a Word document for circulating to colleagues: primary language, answer formats, branching logic, randomization, and translation coverage.</p>
+    </section>
+
+    <section>
+      <h2>Configuration</h2>
+      <div class="config-item">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/randomization">Randomization</a>
+        <span class="config-desc">{{ pool_count }} pool{{ '' if pool_count == 1 else 's' }} configured</span>
+      </div>
+      <div class="config-item">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/files">Files</a>
+        <span class="config-desc">{{ files_count }} file{{ '' if files_count == 1 else 's' }} uploaded</span>
+      </div>
+    </section>
+
+    <section class="danger">
+      <h2>Danger zone</h2>
+      <div class="danger-row">
+        <p class="danger-text">
+          Deleting this survey permanently removes the questionnaire,
+          <strong>{{ response_count }} response{{ '' if response_count == 1 else 's' }}</strong>,
+          {{ files_count }} uploaded file{{ '' if files_count == 1 else 's' }}, and all randomization counters.
+          This cannot be undone.
+        </p>
+        <form method="post" action="/admin/surveys/{{ slug }}/delete"
+              onsubmit="return confirm('Permanently delete “{{ title }}” and all {{ response_count }} responses? This cannot be undone.')">
+          <button class="btn btn-danger">Delete survey</button>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function copyUrl() {
+      var btn = document.querySelector('.url-box button');
+      navigator.clipboard.writeText(document.getElementById('public-url').textContent).then(function() {
+        var orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = orig; }, 1500);
+      });
+    }
+  </script>
+</body>
+</html>

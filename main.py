@@ -13,9 +13,13 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from openpyxl import Workbook
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 import auth
 import crypto
+import review_export
 import totp
 
 DB_PATH = os.getenv("DB_PATH", "/data/survey.db")
@@ -490,6 +494,61 @@ async def create_survey(
     return RedirectResponse("/admin", status_code=302)
 
 
+@app.get("/admin/surveys/{slug}", response_class=HTMLResponse)
+async def manage_survey(slug: str, request: Request):
+    """Per-survey hub: share link + QR, exports, questionnaire tools,
+    configuration links, and the danger zone."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    stats = db.execute(
+        "SELECT COUNT(*) AS n, MAX(submitted_at) AS last FROM responses WHERE survey_id = ?",
+        (row["id"],),
+    ).fetchone()
+    pool_count = db.execute(
+        "SELECT COUNT(*) FROM rand_pools WHERE survey_id = ?", (row["id"],)
+    ).fetchone()[0]
+    owner = db.execute(
+        "SELECT email FROM users WHERE id = ?", (row["owner_id"],)
+    ).fetchone()
+    db.close()
+
+    schema = json.loads(row["schema_json"])
+    locales = review_export._locales_in(schema) or {"en"}
+    langs = [l for l in review_export.LANGS if l in locales]
+
+    upload_dir = os.path.join(UPLOADS_PATH, slug)
+    files_count = len(os.listdir(upload_dir)) if os.path.isdir(upload_dir) else 0
+
+    # honour the reverse proxy's scheme so the QR points at the public URL
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("host", request.url.netloc)
+    public_url = f"{scheme}://{host}/s/{slug}"
+
+    return templates.TemplateResponse("manage.html", {
+        "request": request,
+        "user": user,
+        "slug": slug,
+        "title": row["title"],
+        "active": row["active"],
+        "created_at": row["created_at"],
+        "owner_email": owner["email"] if owner else None,
+        "response_count": stats["n"],
+        "last_response": stats["last"],
+        "pool_count": pool_count,
+        "files_count": files_count,
+        "langs": langs,
+        "public_url": public_url,
+        "qr": totp.qr_data_uri(public_url),
+    })
+
+
 @app.get("/admin/surveys/{slug}/edit", response_class=HTMLResponse)
 async def edit_survey_page(slug: str, request: Request):
     db = get_db()
@@ -547,7 +606,7 @@ async def edit_survey(
     )
     db.commit()
     db.close()
-    return RedirectResponse("/admin", status_code=302)
+    return RedirectResponse(f"/admin/surveys/{slug}", status_code=302)
 
 
 @app.post("/admin/surveys/{slug}/toggle")
@@ -824,6 +883,52 @@ def _get_responses(db, slug: str):
     ).fetchall()
 
 
+def _flat_table(rows):
+    """(columns, flat_rows) shared by the CSV and Excel exports, so the two
+    formats always agree on structure. Column order follows first appearance;
+    _submitted_at goes last."""
+    flat_rows = []
+    all_keys: list[str] = []
+    seen_keys: set[str] = set()
+    for r in rows:
+        flat = _flatten(json.loads(r["response_json"]))
+        flat["_submitted_at"] = r["submitted_at"]
+        flat_rows.append(flat)
+        for k in flat:
+            if k not in seen_keys:
+                seen_keys.add(k)
+                all_keys.append(k)
+    cols = [k for k in all_keys if k != "_submitted_at"] + ["_submitted_at"]
+    return cols, flat_rows
+
+
+def _build_xlsx(cols, flat_rows) -> bytes:
+    """Excel workbook: frozen bold header, autofilter, native numeric types.
+    Strings that look like formulas are forced to text — open-ended answers
+    must never execute in a reviewer's Excel."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Responses"
+    for j, k in enumerate(cols, start=1):
+        cell = ws.cell(row=1, column=j, value=k)
+        cell.font = Font(bold=True)
+    for i, flat in enumerate(flat_rows, start=2):
+        for j, k in enumerate(cols, start=1):
+            v = flat.get(k, "")
+            cell = ws.cell(row=i, column=j)
+            cell.value = v
+            if isinstance(v, str) and v.startswith("="):
+                cell.data_type = "s"
+    for j, k in enumerate(cols, start=1):
+        sample = [len(str(fr.get(k, ""))) for fr in flat_rows[:200]]
+        ws.column_dimensions[get_column_letter(j)].width = min(60, max(10, len(k), *sample))
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = ws.dimensions
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
 @app.get("/admin/surveys/{slug}/export.csv")
 async def export_csv(slug: str, request: Request):
     db = get_db()
@@ -841,20 +946,7 @@ async def export_csv(slug: str, request: Request):
     if not rows:
         return HTMLResponse("No responses yet.")
 
-    flat_rows = []
-    all_keys: list[str] = []
-    seen_keys: set[str] = set()
-    for r in rows:
-        flat = _flatten(json.loads(r["response_json"]))
-        flat["_submitted_at"] = r["submitted_at"]
-        flat_rows.append(flat)
-        for k in flat:
-            if k not in seen_keys:
-                seen_keys.add(k)
-                all_keys.append(k)
-
-    # _submitted_at last
-    cols = [k for k in all_keys if k != "_submitted_at"] + ["_submitted_at"]
+    cols, flat_rows = _flat_table(rows)
 
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore", restval="")
@@ -865,6 +957,65 @@ async def export_csv(slug: str, request: Request):
         io.BytesIO(buf.getvalue().encode("utf-8")),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{slug}.csv"'},
+    )
+
+
+@app.get("/admin/surveys/{slug}/export.xlsx")
+async def export_xlsx(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if not _owned_survey(db, slug, user):
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    rows = _get_responses(db, slug)
+    db.close()
+    if rows is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if not rows:
+        return HTMLResponse("No responses yet.")
+
+    cols, flat_rows = _flat_table(rows)
+    data = _build_xlsx(cols, flat_rows)
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{slug}.xlsx"'},
+    )
+
+
+@app.get("/admin/surveys/{slug}/review.docx")
+async def export_review_docx(slug: str, request: Request):
+    """Word rendering of the questionnaire itself (not the responses), for
+    circulating to reviewers: primary-language texts, answer formats,
+    visibility logic, randomization pools, and translation coverage flags."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    pool_rows = db.execute(
+        "SELECT pool_name, pool_pages, show_count, condition_var, condition_map "
+        "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
+        (row["id"],),
+    ).fetchall()
+    db.close()
+
+    data = review_export.build_review_docx(
+        json.loads(row["schema_json"]),
+        review_export.pools_from_rows(pool_rows),
+        row["title"],
+    )
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-review.docx"'},
     )
 
 

@@ -65,7 +65,8 @@
   <header>
     <div class="brand">Survey Admin</div>
     <span class="sub">{{ title }}</span>
-    <a href="/admin">← All surveys</a>
+    <a href="/admin/surveys/{{ slug }}">← Back to survey</a>
+    <a href="/admin">All surveys</a>
     <a href="/logout">Sign out</a>
   </header>
 
@@ -90,7 +91,7 @@
 
         <div class="actions">
           <button type="submit" class="btn-primary">Save changes</button>
-          <a href="/admin" class="btn-secondary">Cancel</a>
+          <a href="/admin/surveys/{{ slug }}" class="btn-secondary">Cancel</a>
         </div>
       </form>
     </section>
