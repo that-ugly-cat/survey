@@ -1,6 +1,6 @@
 <p align="center">
   <b>A lightweight, multi-user survey tool for research data collection.</b><br>
-  Multi-step questionnaires, per-user dashboards, mandatory 2FA, CSV export.
+  Multi-step questionnaires, per-user dashboards, mandatory 2FA, CSV/Excel/JSON export.
 </p>
 
 <p align="center">
@@ -11,7 +11,8 @@
 
 Survey is a self-hosted questionnaire platform built for small-to-medium academic studies.
 Users register their own accounts, create and manage surveys from a private dashboard, and
-share them at a public `/s/{slug}` URL; responses land in SQLite and export to CSV.
+share them at a public `/s/{slug}` URL; responses land in SQLite and export to CSV, Excel,
+or JSON.
 
 ## Features
 
@@ -29,8 +30,16 @@ share them at a public `/s/{slug}` URL; responses land in SQLite and export to C
 - **File uploads** per survey, plus a shared folder for static assets.
 - **Language selector** (EN/DE/FR/IT) with browser autodetect and visibility driven by which
   translations exist in the schema.
-- **Survey dashboard**: create/edit surveys, manage uploads, export responses (CSV) and survey
-  schemas (JSON).
+- **Per-survey manage page** — stats (responses, last response), shareable public URL with a
+  ready-made **QR code**, exports, questionnaire tools, and a danger zone that spells out
+  what a delete destroys. The survey list keeps only the everyday actions.
+- **Response exports: CSV, Excel, JSON** — CSV and Excel are guaranteed to share the same
+  columns; the Excel file adds a frozen header, autofilter, native number types, and forces
+  formula-looking strings to text so open-ended answers can't execute on the analyst's machine.
+- **Questionnaire review export (DOCX)** — renders the survey itself as a Word document for
+  circulating to colleagues: primary-language texts, answer formats per question type,
+  branching logic in plain English, the survey's randomization pools, and per-element
+  translation coverage flags (present / partial / missing).
 - Built on the [SurveyJS Form Library](https://surveyjs.io/) (MIT).
 
 ## Quick start
@@ -53,11 +62,12 @@ Passwords are bcrypt-hashed; sessions are signed cookies (itsdangerous); TOTP is
 and its secrets are Fernet-encrypted at rest.
 
 ```
-main.py           — routes (auth, 2FA, admin, survey render/submit, uploads, export)
+main.py           — routes (auth, 2FA, admin, survey render/submit, uploads, exports)
 auth.py           — password hashing + signed session cookies (pending → full scope)
 totp.py           — TOTP + backup codes (RFC 6238, stdlib)
 crypto.py         — Fernet encryption for stored TOTP secrets
-templates/        — landing, login, register, twofa, admin, admin_users, profile, survey, …
+review_export.py  — questionnaire → review DOCX (translations, logic, randomization)
+templates/        — landing, twofa, admin, manage, admin_users, profile, survey, …
 static-data/      — reference JSON (cantons, countries) to upload via the file manager
 ```
 
