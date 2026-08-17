@@ -38,8 +38,10 @@ or JSON.
 - **Language selector** (EN/DE/FR/IT) with browser autodetect and visibility driven by which
   translations exist in the schema.
 - **Per-survey manage page** — stats (responses, last response), shareable public URL with a
-  ready-made **QR code**, exports, questionnaire tools, and a danger zone that spells out
-  what a delete destroys. The survey list keeps only the everyday actions.
+  ready-made **QR code**, exports, questionnaire tools, panel settings, and a danger zone that
+  spells out what a delete destroys. The survey list keeps only the everyday actions. Help
+  modals behind each **?** document panel recruitment, randomization and file uploads in place,
+  so the settings do not need a manual open in another window.
 - **Response exports: CSV, Excel, JSON** — CSV and Excel are guaranteed to share the same
   columns; the Excel file adds a frozen header, autofilter, native number types, and forces
   formula-looking strings to text so open-ended answers can't execute on the analyst's machine.
@@ -62,6 +64,75 @@ uvicorn main:app --reload
 Open http://localhost:8000/ for the landing page, then register or sign in. The first
 login walks you through 2FA enrolment.
 
+## Running a panel field
+
+Demoscopic providers (Bilendi, Dynata, Cint, Toluna…) hand each respondent a single-use
+identifier in the link they open, and expect the questionnaire to send them back to a return
+URL carrying it. That return leg is how the provider learns the person finished, and therefore
+how the person gets paid; a field that collects the token but never bounces the respondent back
+cannot be reconciled or invoiced.
+
+Set it up from the survey's manage page, under **Panel recruitment**:
+
+1. **Token parameter** — the query parameter carrying the respondent id. Providers disagree
+   on the name (`RID` for Bilendi and Cint, `psid` for Dynata, `tid` for Toluna) and on its
+   capitalisation, so the match is case-insensitive. Setting this field switches panel mode on;
+   clearing it returns the survey to an open link.
+2. **Return URLs** — the provider supplies three, and all three are used: complete, screenout,
+   and quota full. The token is appended as `?param=token`, or substituted for a `{token}`
+   placeholder when the provider's URL carries the id mid-path.
+3. **Entry URL** — hand the provider `https://…/s/{slug}?RID=[respondent id]`.
+
+From there:
+
+- Anyone arriving without a valid token is stopped before the questionnaire and sent to the
+  screenout URL, so a respondent nobody can credit does not spend ten minutes answering. Append
+  `?preview=1` while signed in as the owner to walk the questionnaire yourself; preview
+  submissions are stored but never bounce to the provider.
+- A token that has already produced a response can neither re-enter nor submit again. This is
+  enforced by a uniqueness constraint in the database rather than a check before the insert, so
+  two simultaneous submissions cannot both slip through.
+- The questionnaire routes non-completions by setting a field named `_outcome` to `screenout`
+  or `quotafull` (the default when absent is `complete`). A consent gate is the usual case:
+
+  ```json
+  "triggers": [{
+    "type": "setvalue",
+    "expression": "{consent} empty",
+    "setToName": "_outcome",
+    "setValue": "screenout"
+  }]
+  ```
+
+  The response is stored either way, so refusals and screenouts stay in the data rather than
+  vanishing.
+- The token appears as `_panel_token` in the CSV, Excel and JSON exports, which is the column
+  you reconcile against the provider's delivery file.
+
+> A panel token is a pseudonymous identifier: the provider can trace it back to a person. A
+> study recruiting this way should say so in its ethics application and its participant
+> information, and should not describe its responses as carrying no identifying metadata.
+
+## Checks
+
+Two self-contained scripts, no test framework and no running server. They build their own
+temporary database, so they never touch real data:
+
+```bash
+python test_panel.py && python test_panel_migration.py
+```
+
+`test_panel.py` covers panel entry and return, one-use tokens, outcome routing, and the
+assignment ledger. `test_panel_migration.py` upgrades a database in the pre-panel shape and
+checks the backfill, then compiles and renders every template.
+
+To run them against a built image without disturbing the running container:
+
+```bash
+docker compose run --rm --no-deps --entrypoint sh survey \
+  -c "pip install --quiet httpx && cd /app && python test_panel.py && python test_panel_migration.py"
+```
+
 ## Stack
 
 FastAPI · SQLite · Jinja2 · [SurveyJS](https://surveyjs.io/) on the frontend. No build step.
@@ -80,12 +151,6 @@ test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, ass
 test_panel_migration.py — migrating an existing database, plus template rendering
 ```
 
-Run the checks with no test framework and no server:
-
-```bash
-python test_panel.py && python test_panel_migration.py
-```
-
 ## Deployment
 
 See **[DEPLOY.md](DEPLOY.md)** for production setup (environment variables, Docker, reverse
@@ -99,11 +164,14 @@ proxy, backups).
 - 2FA is mandatory: a fresh account gets a short-lived pending session until it enrols.
 - The whole database is a single SQLite file — back up by copying it.
 - Survey definitions are created/edited from the admin dashboard, not shipped in this repo.
-- Panel mode is off until a token parameter is set on the survey's manage page. Once on, the
-  questionnaire cannot be entered without a valid token; append `?preview=1` while signed in
-  as the owner to walk it yourself. A panel token is a pseudonymous identifier the provider
-  can trace back to a person, so a study using panel mode should say so in its ethics
-  application and in its participant information.
+- Panel mode is off until a token parameter is set on the survey's manage page, and turning it
+  on closes the survey to anyone without a valid token. See
+  [Running a panel field](#running-a-panel-field).
+- Randomization balances on completed responses, plus assignments issued in the last hour so
+  that simultaneous starts spread out. An abandoned page load therefore stops skewing the arms
+  once it ages out, which matters under panel traffic where abandonment is high. Upgrading from
+  a version that counted page loads migrates the old counters once — see
+  [DEPLOY.md](DEPLOY.md#1-configuration-environment-variables).
 
 ## License
 
