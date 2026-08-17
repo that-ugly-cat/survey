@@ -168,6 +168,7 @@
 
       <h4>Balanced allocation (minimization)</h4>
       <p>The algorithm always assigns the combination with the lowest count so far. Ties are broken randomly. This keeps exposure counts as balanced as possible without pure randomization — no participant-level blocking needed.</p>
+      <p>The count that drives the balancing is <strong>completed responses</strong>, not page loads, plus any assignment issued in the last hour so that simultaneous starts do not all land on the same combination. A participant who opens the link and leaves therefore stops affecting the balance once the hour is up, which matters most with panel traffic, where abandonment is high. The <strong>In progress</strong> column shows the assignments currently counted but not yet submitted.</p>
 
       <h4>Condition variable</h4>
       <p>Only available when <strong>Show = 1</strong>. Set a name here (e.g. <code>condition</code>) and the system will expose that variable in the survey before it renders — so you can use it in <code>visibleIf</code> expressions on any page:</p>
@@ -248,7 +249,7 @@
         </form>
 
         <div class="balance-header">
-          <span class="balance-title">Balance{% if pool.total %} — {{ pool.total }} assigned{% endif %}</span>
+          <span class="balance-title">Balance{% if pool.total %} — {{ pool.total }} completed{% endif %}{% if pool.pending_total %}, {{ pool.pending_total }} in progress{% endif %}</span>
           {% if pool.counts %}
           <form method="post" action="/admin/surveys/{{ slug }}/randomization/{{ pool.id }}/reset"
                 onsubmit="return confirm('Reset counters for {{ pool.pool_name }}?')">
@@ -259,13 +260,14 @@
 
         {% if pool.counts %}
         <table>
-          <thead><tr><th>Condition</th><th>Count</th><th></th></tr></thead>
+          <thead><tr><th>Condition</th><th>Completed</th><th>In progress</th><th></th></tr></thead>
           <tbody>
             {% for row in pool.counts %}
             {% set pct = (row.count / pool.total * 100) | round(1) if pool.total else 0 %}
             <tr>
               <td class="cond-key">{{ row.condition_key }}</td>
               <td><span class="count-n">{{ row.count }}</span> <span class="pct">({{ pct }}%)</span></td>
+              <td><span class="pct">{{ row.pending or '—' }}</span></td>
               <td><div class="bar-wrap"><div class="bar-fill" style="width:{{ pct }}%"></div></div></td>
             </tr>
             {% endfor %}

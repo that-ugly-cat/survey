@@ -79,6 +79,30 @@
     .config-item:last-child { margin-bottom: 0; }
     .config-desc { font-size: 0.8rem; color: #718096; }
 
+    .field { margin-bottom: 1rem; }
+    .field label { display: block; font-size: 0.74rem; font-weight: 700;
+                   text-transform: uppercase; letter-spacing: 0.06em;
+                   color: #4a5568; margin-bottom: 0.35rem; }
+    .field input {
+      width: 100%; background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.55rem 0.8rem; color: #e2e8f0; font-size: 0.84rem;
+      font-family: monospace;
+    }
+    .field input:focus { outline: none; border-color: #4a6fa5; }
+    .field .hint { margin-top: 0.3rem; }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 1.2rem; }
+    .notice { border-radius: 6px; padding: 0.6rem 0.9rem; font-size: 0.8rem; margin-bottom: 1.2rem; }
+    .notice-ok  { background: #0d2e1a; color: #48bb78; border: 1px solid #1a4731; }
+    .notice-err { background: #2d1515; color: #fc8181; border: 1px solid #7b2020; }
+    .doc { font-size: 0.78rem; color: #718096; line-height: 1.7; margin-top: 1.2rem;
+           border-top: 1px solid #2d3148; padding-top: 1.2rem; }
+    .doc code { font-family: monospace; color: #63b3ed; font-size: 0.76rem; }
+    .doc pre {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.7rem 0.9rem; margin: 0.5rem 0; overflow-x: auto;
+      font-size: 0.72rem; color: #a0aec0; line-height: 1.5;
+    }
+
     section.danger { border-color: #7b2020; }
     section.danger h2 { color: #fc8181; }
     .danger-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
@@ -161,6 +185,66 @@
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/files">Files</a>
         <span class="config-desc">{{ files_count }} file{{ '' if files_count == 1 else 's' }} uploaded</span>
       </div>
+    </section>
+
+    <section>
+      <h2>Panel recruitment</h2>
+
+      {% if panel_saved %}<div class="notice notice-ok">Panel settings saved.</div>{% endif %}
+      {% if panel_error %}<div class="notice notice-err">{{ panel_error }}</div>{% endif %}
+
+      <form method="post" action="/admin/surveys/{{ slug }}/panel">
+        <div class="field">
+          <label for="token_param">Token parameter</label>
+          <input id="token_param" name="token_param" value="{{ panel.param or '' }}"
+                 placeholder="RID" autocomplete="off">
+          <p class="hint">The query parameter carrying the respondent id in the entry URL.
+            Bilendi and Cint use <code>RID</code>, Dynata <code>psid</code>, Toluna <code>tid</code>.
+            Matched case-insensitively. Leave empty to turn panel mode off.</p>
+        </div>
+        <div class="grid2">
+          <div class="field">
+            <label for="complete_url">Complete URL</label>
+            <input id="complete_url" name="complete_url" value="{{ panel.complete or '' }}"
+                   placeholder="https://panel.example.com/complete" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="screenout_url">Screenout URL</label>
+            <input id="screenout_url" name="screenout_url" value="{{ panel.screenout or '' }}"
+                   placeholder="https://panel.example.com/screenout" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="quotafull_url">Quota full URL</label>
+            <input id="quotafull_url" name="quotafull_url" value="{{ panel.quotafull or '' }}"
+                   placeholder="https://panel.example.com/quotafull" autocomplete="off">
+          </div>
+        </div>
+        <p class="hint" style="margin-bottom:1rem">The provider supplies all three. The token is
+          appended as <code>?{parameter}={token}</code>, or substituted in place if the URL
+          contains a <code>{token}</code> placeholder.</p>
+        <button class="btn btn-primary">Save panel settings</button>
+      </form>
+
+      {% if panel.param %}
+      <div class="doc">
+        <p><strong>Entry URL to give the provider</strong></p>
+        <pre>{{ public_url }}?{{ panel.param }}=<em>[respondent id]</em></pre>
+        <p>Respondents arriving without a valid token are stopped before the questionnaire and
+          sent to the screenout URL, and a token that has already produced a response is refused.
+          To walk the questionnaire yourself, append <code>?preview=1</code> while signed in.</p>
+        <p style="margin-top:0.9rem"><strong>Sending a respondent to screenout or quota full</strong></p>
+        <p>Set <code>_outcome</code> anywhere in the questionnaire and the return URL follows it.
+          The usual case is a consent or eligibility gate:</p>
+        <pre>"triggers": [{
+  "type": "setvalue",
+  "expression": "{consent} empty",
+  "setToName": "_outcome",
+  "setValue": "screenout"
+}]</pre>
+        <p>Accepted values are <code>complete</code> (the default), <code>screenout</code> and
+          <code>quotafull</code>. The response is stored either way, so refusals stay in the data.</p>
+      </div>
+      {% endif %}
     </section>
 
     <section class="danger">

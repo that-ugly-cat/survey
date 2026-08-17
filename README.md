@@ -26,7 +26,14 @@ or JSON.
 - **Canton/country reference data** (EN/DE/FR/IT) — upload once via the admin file manager,
   reuse across surveys.
 - **Balanced randomization**: multiple independent pools per survey, each with sampleable
-  pages, show-count and balancing counters.
+  pages, show-count and balancing counters. Balancing is driven by *completed responses*
+  rather than page loads, plus a one-hour window of in-flight assignments so that concurrent
+  starts spread out; an abandoned session stops skewing the arms once it ages out.
+- **Panel recruitment** — enter respondents from a demoscopic provider (Bilendi, Dynata,
+  Cint, Toluna…) and return them so the provider can credit their participation: a
+  configurable token parameter read from the entry URL, three return URLs (complete,
+  screenout, quota full), one-use enforcement per token, and an `_outcome` field the
+  questionnaire can set to route consent refusals and quota exits to the right URL.
 - **File uploads** per survey, plus a shared folder for static assets.
 - **Language selector** (EN/DE/FR/IT) with browser autodetect and visibility driven by which
   translations exist in the schema.
@@ -69,6 +76,14 @@ crypto.py         — Fernet encryption for stored TOTP secrets
 review_export.py  — questionnaire → review DOCX (translations, logic, randomization)
 templates/        — landing, twofa, admin, manage, admin_users, profile, survey, …
 static-data/      — reference JSON (cantons, countries) to upload via the file manager
+test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, assignment ledger
+test_panel_migration.py — migrating an existing database, plus template rendering
+```
+
+Run the checks with no test framework and no server:
+
+```bash
+python test_panel.py && python test_panel_migration.py
 ```
 
 ## Deployment
@@ -84,6 +99,11 @@ proxy, backups).
 - 2FA is mandatory: a fresh account gets a short-lived pending session until it enrols.
 - The whole database is a single SQLite file — back up by copying it.
 - Survey definitions are created/edited from the admin dashboard, not shipped in this repo.
+- Panel mode is off until a token parameter is set on the survey's manage page. Once on, the
+  questionnaire cannot be entered without a valid token; append `?preview=1` while signed in
+  as the owner to walk it yourself. A panel token is a pseudonymous identifier the provider
+  can trace back to a person, so a study using panel mode should say so in its ethics
+  application and in its participant information.
 
 ## License
 

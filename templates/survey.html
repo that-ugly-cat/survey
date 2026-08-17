@@ -56,7 +56,9 @@
     var slug            = {{ slug  | tojson }};
     var assigned_pages  = {{ assigned_pages | tojson }};
     var pool_pages      = {{ pool_pages | tojson }};
+    var assignment_ids  = {{ assignment_ids | tojson }};
     var conditions      = {{ conditions | tojson }};
+    var panel_token     = {{ panel_token | tojson }};
     var LANGS           = ["en", "de", "fr", "it"];
 
     // Scan schema recursively for locale keys inside localized string objects.
@@ -126,6 +128,11 @@
         }
       }
 
+      // --- panel token ---
+      // Exposed as {panelToken} so the schema can branch on it if it needs to,
+      // and echoed back on submit so the server can build the return URL.
+      if (panel_token) survey.setVariable('panelToken', panel_token);
+
       // --- timing ---
       var t0          = Date.now();   // survey start
       var pageT0      = Date.now();   // current page start
@@ -168,12 +175,16 @@
           }
         });
         if (assigned_pages) payload._assignment = assigned_pages.join(",");
+        // the server marks these pending assignments as completed, which is what
+        // keeps the balancing counts tied to responses rather than to page loads
+        if (assignment_ids && assignment_ids.length) payload._assignment_ids = assignment_ids;
         if (conditions && Object.keys(conditions).length > 0) {
           payload._conditions = conditions;
         } else {
           var cond = survey.getVariable('condition');
           if (cond) payload._condition = cond;
         }
+        if (panel_token) payload._panel_token = panel_token;
 
         options.showSaveInProgress();
         fetch('/s/' + slug + '/submit', {
@@ -182,7 +193,18 @@
           body: JSON.stringify(payload)
         })
         .then(function(r) {
-          if (r.ok) { options.showSaveSuccess(); } else { options.showSaveError(); }
+          return r.json().catch(function() { return {}; }).then(function(body) {
+            if (r.ok) {
+              options.showSaveSuccess();
+            } else {
+              options.showSaveError();
+            }
+            // Panel respondents must land back on the provider or they cannot be
+            // credited. Give the completion state a moment to paint first.
+            if (body && body.redirect) {
+              setTimeout(function() { window.location.replace(body.redirect); }, 1200);
+            }
+          });
         })
         .catch(function() { options.showSaveError(); });
       });

@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import sqlite3
+import urllib.parse
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -32,6 +33,20 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".pdf"}
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+# --- panel recruitment ---
+# Panel providers (Bilendi, Dynata, Cint, Toluna...) hand each respondent a
+# single-use token in the entry URL and expect us to bounce them back to one of
+# three return URLs with that token attached. Without the bounce the provider
+# cannot credit the respondent, so a panel field is unusable without this.
+PANEL_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
+PANEL_PARAM_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
+PANEL_OUTCOMES = ("complete", "screenout", "quotafull")
+
+# An assignment issued but not yet submitted still counts toward balancing for
+# this long, which keeps concurrent starts from piling onto the same arm without
+# letting abandoned sessions skew the arms permanently.
+PENDING_ASSIGNMENT_MINUTES = 60
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -98,6 +113,8 @@ def init_db():
             condition_var  TEXT NULL,
             condition_map  TEXT NULL
         );
+        -- legacy aggregate counter, superseded by `assignments`. Kept so that
+        -- an existing deployment can be backfilled from it exactly once.
         CREATE TABLE IF NOT EXISTS assignment_counts (
             pool_id       INTEGER NOT NULL REFERENCES rand_pools(id) ON DELETE CASCADE,
             condition_key TEXT NOT NULL,
@@ -111,10 +128,64 @@ def init_db():
         db.execute("ALTER TABLE rand_pools ADD COLUMN condition_var TEXT NULL")
     if "condition_map" not in cols:
         db.execute("ALTER TABLE rand_pools ADD COLUMN condition_map TEXT NULL")
+
+    # panel recruitment config, per survey (additive)
+    for col in ("panel_token_param", "panel_complete_url",
+                "panel_screenout_url", "panel_quotafull_url"):
+        if col not in survey_cols:
+            db.execute(f"ALTER TABLE surveys ADD COLUMN {col} TEXT NULL")
+
+    # panel token on each response, unique per survey so a token cannot be
+    # spent twice. SQLite treats NULLs as distinct, so non-panel surveys are
+    # unaffected by the index.
+    resp_cols = {r[1] for r in db.execute("PRAGMA table_info(responses)").fetchall()}
+    if "panel_token" not in resp_cols:
+        db.execute("ALTER TABLE responses ADD COLUMN panel_token TEXT NULL")
+    db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_responses_panel_token
+                  ON responses (survey_id, panel_token)""")
+
+    # Per-assignment ledger. Replaces the aggregate assignment_counts, which
+    # incremented on page load and so drifted with every abandonment and reload.
+    fresh_assignments = not db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='assignments'"
+    ).fetchone()
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS assignments (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            pool_id       INTEGER NOT NULL REFERENCES rand_pools(id) ON DELETE CASCADE,
+            condition_key TEXT NOT NULL,
+            issued_at     TEXT NOT NULL DEFAULT (datetime('now')),
+            completed     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_assignments_pool
+            ON assignments (pool_id, completed, issued_at);
+    """)
+    if fresh_assignments:
+        _backfill_assignments(db)
     db.commit()
 
     _bootstrap_admin(db)
     db.close()
+
+
+def _backfill_assignments(db):
+    """Seed the per-assignment ledger from the old aggregate counters so that
+    balancing continues from where it left off rather than restarting.
+
+    The old counters cannot distinguish a completed response from an abandoned
+    page load, so every historical count is carried over as completed. That
+    slightly overstates history, and it is the closest reconstruction available.
+    """
+    if not db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='assignment_counts'"
+    ).fetchone():
+        return
+    for row in db.execute("SELECT pool_id, condition_key, count FROM assignment_counts"):
+        if row["count"] > 0:
+            db.executemany(
+                "INSERT INTO assignments (pool_id, condition_key, completed) VALUES (?, ?, 1)",
+                [(row["pool_id"], row["condition_key"])] * row["count"],
+            )
 
 
 def _bootstrap_admin(db):
@@ -306,26 +377,125 @@ async def api_2fa_verify(request: Request):
 
 # --- randomization ---
 
-def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> list:
+def _pool_counts(db, pool_id: int) -> tuple[dict, dict]:
+    """(completed, pending) counts per condition for one pool.
+
+    Balancing is driven by completed responses, with assignments issued in the
+    last PENDING_ASSIGNMENT_MINUTES counted too. Without the pending term a burst
+    of simultaneous starts would all see the same counts and land on the same
+    arm; with it, an abandoned session stops distorting the arms once it ages out.
+    """
+    completed, pending = {}, {}
+    rows = db.execute(
+        f"""SELECT condition_key,
+                   SUM(completed) AS done,
+                   SUM(CASE WHEN completed = 0
+                             AND issued_at > datetime('now', '-{PENDING_ASSIGNMENT_MINUTES} minutes')
+                            THEN 1 ELSE 0 END) AS live
+            FROM assignments WHERE pool_id = ? GROUP BY condition_key""",
+        (pool_id,),
+    ).fetchall()
+    for r in rows:
+        completed[r["condition_key"]] = r["done"] or 0
+        pending[r["condition_key"]] = r["live"] or 0
+    return completed, pending
+
+
+def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> tuple[list, int]:
+    """Pick the least-used combination and record a pending assignment.
+
+    Returns (pages, assignment_id). The assignment is marked completed only when
+    the response is submitted, so page loads that go nowhere do not consume an arm.
+    """
     all_conditions = [
         ",".join(sorted(combo))
         for combo in itertools.combinations(pool, show_count)
     ]
-    rows = db.execute(
-        "SELECT condition_key, count FROM assignment_counts WHERE pool_id = ?",
-        (pool_id,),
-    ).fetchall()
-    counts = {r["condition_key"]: r["count"] for r in rows}
-    min_count = min((counts.get(c, 0) for c in all_conditions), default=0)
-    candidates = [c for c in all_conditions if counts.get(c, 0) == min_count]
-    chosen = random.choice(candidates)
-    db.execute(
-        """INSERT INTO assignment_counts (pool_id, condition_key, count) VALUES (?, ?, 1)
-           ON CONFLICT (pool_id, condition_key) DO UPDATE SET count = count + 1""",
+    completed, pending = _pool_counts(db, pool_id)
+    load = {c: completed.get(c, 0) + pending.get(c, 0) for c in all_conditions}
+    min_count = min(load.values(), default=0)
+    chosen = random.choice([c for c in all_conditions if load[c] == min_count])
+    cur = db.execute(
+        "INSERT INTO assignments (pool_id, condition_key) VALUES (?, ?)",
         (pool_id, chosen),
     )
+    assignment_id = cur.lastrowid
+    # housekeeping: pending rows older than a week can never complete
+    db.execute(
+        "DELETE FROM assignments WHERE pool_id = ? AND completed = 0 "
+        "AND issued_at < datetime('now', '-7 days')",
+        (pool_id,),
+    )
     db.commit()
-    return chosen.split(",")
+    return chosen.split(","), assignment_id
+
+
+def _complete_assignments(db, survey_id: int, ids) -> None:
+    """Mark the pending assignments for a submitted response as completed.
+
+    Ids come from the client, so the update is scoped to pools belonging to this
+    survey: an arbitrary id from elsewhere cannot be flipped.
+    """
+    clean = [int(i) for i in ids if str(i).isdigit()][:10]
+    if not clean:
+        return
+    placeholders = ",".join("?" * len(clean))
+    db.execute(
+        f"""UPDATE assignments SET completed = 1
+            WHERE id IN ({placeholders})
+              AND pool_id IN (SELECT id FROM rand_pools WHERE survey_id = ?)""",
+        (*clean, survey_id),
+    )
+
+
+# --- panel recruitment helpers ---
+
+def _panel_config(row) -> dict | None:
+    """Panel settings for a survey row, or None when panel mode is off.
+    Panel mode is on as soon as a token parameter is configured."""
+    try:
+        param = row["panel_token_param"]
+    except (IndexError, KeyError):
+        return None
+    if not param:
+        return None
+    return {
+        "param": param,
+        "complete": row["panel_complete_url"] or "",
+        "screenout": row["panel_screenout_url"] or "",
+        "quotafull": row["panel_quotafull_url"] or "",
+    }
+
+
+def _read_panel_token(query_params, param: str) -> str | None:
+    """The token from the entry URL, matched case-insensitively because
+    providers disagree on capitalisation (RID, rid, Rid all appear in the wild).
+    Anything outside the safe charset is treated as absent."""
+    wanted = param.lower()
+    for key, value in query_params.items():
+        if key.lower() == wanted:
+            value = (value or "").strip()
+            return value if PANEL_TOKEN_RE.match(value) else None
+    return None
+
+
+def _panel_redirect(config: dict, outcome: str, token: str | None) -> str | None:
+    """Return URL for an outcome, with the token substituted or appended.
+
+    A `{token}` placeholder anywhere in the configured URL is replaced in place,
+    which covers providers whose return URL carries the id mid-path. Otherwise
+    the token is appended as a query parameter under the same name it arrived in.
+    """
+    url = (config.get(outcome) or "").strip()
+    if not url:
+        return None
+    quoted = urllib.parse.quote(token or "", safe="")
+    if "{token}" in url:
+        return url.replace("{token}", quoted)
+    if not token:
+        return url
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}{urllib.parse.quote(config['param'], safe='')}={quoted}"
 
 
 # --- public routes ---
@@ -345,18 +515,66 @@ async def root(request: Request, error: int = 0, reg_error: str = "", tab: str =
     })
 
 
+def _panel_stop(request, heading: str, message: str, redirect: str | None, status: int = 200):
+    """Dead-end page for a panel respondent who cannot take the survey.
+    Redirects to the provider when a return URL is configured, so the provider
+    can classify them instead of recording an abandonment."""
+    if redirect:
+        return RedirectResponse(redirect, status_code=302)
+    return templates.TemplateResponse(
+        "panel_stop.html",
+        {"request": request, "heading": heading, "message": message},
+        status_code=status,
+    )
+
+
 @app.get("/s/{slug}", response_class=HTMLResponse)
 async def survey_page(request: Request, slug: str):
     db = get_db()
     row = db.execute(
-        "SELECT id, title, schema_json FROM surveys WHERE slug = ? AND active = 1", (slug,)
+        "SELECT * FROM surveys WHERE slug = ? AND active = 1", (slug,)
     ).fetchone()
     if not row:
         db.close()
         return templates.TemplateResponse("closed.html", {"request": request}, status_code=404)
 
+    # --- panel gate ---
+    panel = _panel_config(row)
+    panel_token = None
+    if panel:
+        panel_token = _read_panel_token(request.query_params, panel["param"])
+        # owners can walk their own survey without a provider token
+        preview = False
+        if request.query_params.get("preview") == "1":
+            viewer = auth.current_user(request, db)
+            preview = bool(viewer and _owned_survey(db, slug, viewer))
+        if not panel_token and not preview:
+            db.close()
+            return _panel_stop(
+                request,
+                "Invalid link",
+                "This survey can only be entered through the link supplied by your panel "
+                "provider, which carries the identifier needed to credit your participation. "
+                "Please return to the panel and start again from there.",
+                _panel_redirect(panel, "screenout", None),
+                status=400,
+            )
+        if panel_token and db.execute(
+            "SELECT 1 FROM responses WHERE survey_id = ? AND panel_token = ?",
+            (row["id"], panel_token),
+        ).fetchone():
+            db.close()
+            return _panel_stop(
+                request,
+                "Already completed",
+                "Our records show this invitation has already been used to complete the "
+                "survey. Each invitation can be used once.",
+                _panel_redirect(panel, "screenout", panel_token),
+            )
+
     assigned_pages_list: list = []
     pool_pages_list: list = []
+    assignment_ids: list = []
     conditions: dict = {}
     pools = db.execute(
         "SELECT id, pool_pages, show_count, condition_var, condition_map FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
@@ -367,7 +585,8 @@ async def survey_page(request: Request, slug: str):
         sc = p["show_count"]
         if pool and 0 < sc <= len(pool):
             pool_pages_list.extend(pool)
-            assigned = _assign_condition(db, p["id"], pool, sc)
+            assigned, assignment_id = _assign_condition(db, p["id"], pool, sc)
+            assignment_ids.append(assignment_id)
             assigned_pages_list.extend(assigned)
             # condition variable: only meaningful when show_count=1
             cvar = p["condition_var"]
@@ -394,27 +613,55 @@ async def survey_page(request: Request, slug: str):
         "schema": json.loads(row["schema_json"]),
         "assigned_pages": assigned_pages,
         "pool_pages": pool_pages,
+        "assignment_ids": assignment_ids,
         "conditions": conditions,
+        "panel_token": panel_token,
     })
 
 
 @app.post("/s/{slug}/submit")
 async def submit(slug: str, request: Request):
     db = get_db()
-    row = db.execute(
-        "SELECT id, active FROM surveys WHERE slug = ?", (slug,)
-    ).fetchone()
+    row = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
     if not row or not row["active"]:
         db.close()
         return JSONResponse({"error": "survey not found or closed"}, status_code=404)
     data = await request.json()
-    db.execute(
-        "INSERT INTO responses (survey_id, response_json) VALUES (?, ?)",
-        (row["id"], json.dumps(data, ensure_ascii=False)),
-    )
+
+    panel = _panel_config(row)
+    token = None
+    if panel:
+        raw = str(data.get("_panel_token") or "").strip()
+        token = raw if PANEL_TOKEN_RE.match(raw) else None
+        data["_panel_token"] = token
+
+    # outcome drives which return URL the respondent bounces to; the schema sets
+    # it with a SurveyJS trigger (see the Panel section of the manage page)
+    outcome = str(data.get("_outcome") or "complete").strip().lower()
+    if outcome not in PANEL_OUTCOMES:
+        outcome = "complete"
+
+    try:
+        db.execute(
+            "INSERT INTO responses (survey_id, response_json, panel_token) VALUES (?, ?, ?)",
+            (row["id"], json.dumps(data, ensure_ascii=False), token),
+        )
+    except sqlite3.IntegrityError:
+        # the unique index caught a token being spent twice
+        db.close()
+        return JSONResponse(
+            {"error": "duplicate", "redirect": _panel_redirect(panel, "screenout", token)},
+            status_code=409,
+        )
+    _complete_assignments(db, row["id"], data.get("_assignment_ids") or [])
     db.commit()
     db.close()
-    return JSONResponse({"ok": True})
+    # No token means nobody to credit, so an owner previewing the questionnaire
+    # is not bounced onto the provider's completion endpoint.
+    return JSONResponse({
+        "ok": True,
+        "redirect": _panel_redirect(panel, outcome, token) if (panel and token) else None,
+    })
 
 
 # --- admin routes ---
@@ -531,6 +778,7 @@ async def manage_survey(slug: str, request: Request):
     host = request.headers.get("host", request.url.netloc)
     public_url = f"{scheme}://{host}/s/{slug}"
 
+    panel = _panel_config(row) or {}
     return templates.TemplateResponse("manage.html", {
         "request": request,
         "user": user,
@@ -546,7 +794,61 @@ async def manage_survey(slug: str, request: Request):
         "langs": langs,
         "public_url": public_url,
         "qr": totp.qr_data_uri(public_url),
+        "panel": panel,
+        "panel_error": request.query_params.get("panel_error", ""),
+        "panel_saved": request.query_params.get("panel_saved") == "1",
     })
+
+
+@app.post("/admin/surveys/{slug}/panel")
+async def save_panel_config(
+    slug: str,
+    request: Request,
+    token_param: str = Form(""),
+    complete_url: str = Form(""),
+    screenout_url: str = Form(""),
+    quotafull_url: str = Form(""),
+):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+
+    token_param = token_param.strip()
+    urls = {k: v.strip() for k, v in (
+        ("complete", complete_url), ("screenout", screenout_url), ("quotafull", quotafull_url)
+    )}
+
+    def fail(message: str):
+        db.close()
+        return RedirectResponse(
+            f"/admin/surveys/{slug}?panel_error={urllib.parse.quote(message)}",
+            status_code=302,
+        )
+
+    if token_param and not PANEL_PARAM_RE.match(token_param):
+        return fail("The token parameter must be 1 to 32 letters, digits, hyphens or underscores.")
+    for name, url in urls.items():
+        if url and not url.lower().startswith(("http://", "https://")):
+            return fail(f"The {name} URL must start with http:// or https://.")
+    if not token_param and any(urls.values()):
+        return fail("Set a token parameter to switch panel mode on, or clear the return URLs.")
+
+    db.execute(
+        """UPDATE surveys SET panel_token_param = ?, panel_complete_url = ?,
+                              panel_screenout_url = ?, panel_quotafull_url = ?
+           WHERE id = ?""",
+        (token_param or None, urls["complete"] or None,
+         urls["screenout"] or None, urls["quotafull"] or None, row["id"]),
+    )
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}?panel_saved=1", status_code=302)
 
 
 @app.get("/admin/surveys/{slug}/edit", response_class=HTMLResponse)
@@ -659,10 +961,13 @@ async def randomization_page(slug: str, request: Request):
     ).fetchall()
     pools_data = []
     for pool in pools_raw:
-        counts = db.execute(
-            "SELECT condition_key, count FROM assignment_counts WHERE pool_id = ? ORDER BY condition_key",
-            (pool["id"],),
-        ).fetchall()
+        completed, pending = _pool_counts(db, pool["id"])
+        keys = sorted(set(completed) | set(pending))
+        counts = [{
+            "condition_key": k,
+            "count": completed.get(k, 0),
+            "pending": pending.get(k, 0),
+        } for k in keys]
         pools_data.append({
             "id": pool["id"],
             "pool_name": pool["pool_name"],
@@ -671,7 +976,8 @@ async def randomization_page(slug: str, request: Request):
             "condition_var": pool["condition_var"] or "",
             "condition_map": pool["condition_map"] or "",
             "counts": counts,
-            "total": sum(r["count"] for r in counts),
+            "total": sum(c["count"] for c in counts),
+            "pending_total": sum(c["pending"] for c in counts),
         })
     db.close()
     return templates.TemplateResponse("randomization.html", {
@@ -744,6 +1050,8 @@ async def save_pool(slug: str, pool_id: int, request: Request):
         "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, condition_var = ?, condition_map = ? WHERE id = ?",
         (pool_name, json.dumps(pool_pages), show_count, condition_var, condition_map, pool_id),
     )
+    # a configuration change invalidates the balance history for this pool
+    db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool_id,))
     db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
     db.commit()
     db.close()
@@ -772,6 +1080,7 @@ async def reset_pool_counts(slug: str, pool_id: int, request: Request):
         db.close()
         return RedirectResponse("/login", status_code=302)
     if _pool_belongs(db, slug, pool_id, user):
+        db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool_id,))
         db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool_id,))
         db.commit()
     db.close()
