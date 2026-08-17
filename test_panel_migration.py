@@ -99,7 +99,20 @@ for label, panel in (("panel off", {}),
                     pool_count=1, files_count=0, langs=["en"], public_url="https://s/s/t",
                     qr="", panel=panel, panel_error="", panel_saved=False)
     ok("Panel recruitment" in html, f"manage.html renders ({label})")
-    ok(("Entry URL to give the provider" in html) == bool(panel), f"entry-URL doc gated ({label})")
+    ok(("Entry URL to give the provider" in html) == bool(panel), f"entry-URL box gated ({label})")
+    # both help modals ship regardless of whether panel mode is on
+    ok('id="panel-help"' in html and 'id="config-help"' in html,
+       f"both help modals present ({label})")
+    ok("openHelp('panel-help')" in html and "openHelp('config-help')" in html,
+       f"both ? buttons wired ({label})")
+    ok("Routing a respondent who does not complete" in html and "_outcome" in html,
+       f"panel modal documents the outcome routing ({label})")
+    ok("balanced allocation" in html.lower() and "/uploads/t/" in html,
+       f"config modal documents randomization and files ({label})")
+    ok("pseudonymous identifier" in html, f"panel modal carries the ethics note ({label})")
+    # the entry-URL example must fall back to a placeholder when panel mode is off
+    expected = (panel.get("param") or "RID") + "=[respondent id]"
+    ok(expected in html, f"entry-URL example uses {expected.split('=')[0]} ({label})")
 
 t = main.templates.get_template("randomization.html")
 html = t.render(request=None, slug="t", title="T", page_names=["info_a"], pools=[{

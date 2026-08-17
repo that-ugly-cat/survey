@@ -103,6 +103,54 @@
       font-size: 0.72rem; color: #a0aec0; line-height: 1.5;
     }
 
+    .section-head { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.4rem; }
+    .section-head h2 { margin-bottom: 0; }
+    .help-btn {
+      background: none; border: 1px solid #2d3148; border-radius: 99px;
+      color: #718096; font-size: 0.72rem; font-weight: 700;
+      width: 1.5rem; height: 1.5rem; cursor: pointer; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .help-btn:hover { border-color: #4a6fa5; color: #4a6fa5; }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.65); z-index: 100;
+      align-items: flex-start; justify-content: center;
+      padding: 2rem 1rem; overflow-y: auto;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px;
+      padding: 2rem 2.2rem; max-width: 620px; width: 100%;
+      position: relative; margin: auto;
+    }
+    .modal-close {
+      position: absolute; top: 1rem; right: 1.2rem;
+      background: none; border: none; color: #4a5568;
+      font-size: 1.1rem; cursor: pointer; line-height: 1;
+    }
+    .modal-close:hover { color: #a0aec0; }
+    .modal h3 { font-size: 0.95rem; font-weight: 700; color: #e2e8f0; margin-bottom: 1.2rem; }
+    .modal h4 { font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+                letter-spacing: 0.07em; color: #4a6fa5; margin: 1.4rem 0 0.5rem; }
+    .modal p  { font-size: 0.82rem; color: #a0aec0; line-height: 1.7; margin-bottom: 0.5rem; }
+    .modal code {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed; font-family: monospace;
+    }
+    .modal pre {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.75rem 1rem; font-size: 0.78rem; color: #a0aec0;
+      font-family: monospace; overflow-x: auto; margin: 0.4rem 0 0.6rem; line-height: 1.6;
+    }
+    .modal ul { padding-left: 1.2rem; margin-bottom: 0.5rem; }
+    .modal li { font-size: 0.82rem; color: #a0aec0; line-height: 1.7; }
+    .modal .note {
+      border-left: 2px solid #4a6fa5; padding-left: 0.9rem; margin: 1rem 0 0.4rem;
+    }
+
     section.danger { border-color: #7b2020; }
     section.danger h2 { color: #fc8181; }
     .danger-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
@@ -110,6 +158,133 @@
   </style>
 </head>
 <body>
+  <!-- Panel recruitment help -->
+  <div class="modal-overlay" id="panel-help">
+    <div class="modal">
+      <button class="modal-close" onclick="closeHelp('panel-help')">✕</button>
+      <h3>Recruiting through a panel provider</h3>
+
+      <p>Demoscopic providers (Bilendi, Dynata, Cint, Toluna and the rest) hand each respondent
+        a single-use identifier in the link they open, and expect the questionnaire to send them
+        back to a return URL carrying that identifier. The return leg is not optional: it is how
+        the provider learns the person finished, and therefore how the person gets paid. A field
+        that collects the token but never bounces the respondent back is unusable.</p>
+
+      <h4>Token parameter</h4>
+      <p>The name of the query parameter carrying the respondent id. Providers disagree on it,
+        and on its capitalisation, so the match is case-insensitive.</p>
+      <ul>
+        <li>Bilendi, Cint — <code>RID</code></li>
+        <li>Dynata — <code>psid</code></li>
+        <li>Toluna — <code>tid</code></li>
+      </ul>
+      <p>Setting this field is what switches panel mode on. Clear it to go back to an open link.</p>
+
+      <h4>Entry URL</h4>
+      <p>Give the provider the public survey URL with the parameter appended:</p>
+      <pre>https://…/s/{{ slug }}?{{ panel.param or 'RID' }}=[respondent id]</pre>
+      <p>Anyone arriving without a valid token is stopped before the questionnaire and sent to
+        the screenout URL, since a respondent nobody can credit should not spend ten minutes
+        answering. To walk the questionnaire yourself, append <code>?preview=1</code> while
+        signed in as the owner; preview submissions are stored but never bounce to the provider.</p>
+
+      <h4>Return URLs</h4>
+      <p>The provider supplies three, and all three are used:</p>
+      <ul>
+        <li><strong>Complete</strong> — the respondent finished and should be credited.</li>
+        <li><strong>Screenout</strong> — they were turned away, by a consent or eligibility gate,
+          a missing token, or a token already spent.</li>
+        <li><strong>Quota full</strong> — their demographic cell is already filled.</li>
+      </ul>
+      <p>The token is appended as <code>?param=token</code>, or, if the URL contains a
+        <code>{token}</code> placeholder, substituted in place. The placeholder form covers
+        providers whose return URL carries the id mid-path:</p>
+      <pre>https://panel.example.com/end/{token}/done</pre>
+
+      <h4>Routing a respondent who does not complete</h4>
+      <p>The questionnaire decides the outcome by setting a field named <code>_outcome</code>.
+        The usual case is a consent gate, wired with a SurveyJS trigger:</p>
+      <pre>"triggers": [{
+  "type": "setvalue",
+  "expression": "{consent} empty",
+  "setToName": "_outcome",
+  "setValue": "screenout"
+}]</pre>
+      <p>Accepted values are <code>complete</code> (the default when the field is absent),
+        <code>screenout</code> and <code>quotafull</code>; anything else falls back to complete.
+        The response is stored either way, so refusals and screenouts stay in your data instead
+        of vanishing.</p>
+
+      <h4>One token, one response</h4>
+      <p>A token that has already produced a response cannot start the questionnaire again, and
+        cannot submit again. This is enforced by a uniqueness constraint in the database rather
+        than by a check before the insert, so two simultaneous submissions cannot slip through.</p>
+
+      <h4>In your data</h4>
+      <p>The token appears as <code>_panel_token</code> in the CSV, Excel and JSON exports, which
+        is what you reconcile against the provider's delivery file.</p>
+
+      <div class="note">
+        <p>A panel token is a pseudonymous identifier: the provider can trace it back to a
+          person. A study recruiting this way should say so in its ethics application and in its
+          participant information, and should not describe its responses as carrying no
+          identifying metadata.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Configuration help -->
+  <div class="modal-overlay" id="config-help">
+    <div class="modal">
+      <button class="modal-close" onclick="closeHelp('config-help')">✕</button>
+      <h3>Randomization and files</h3>
+
+      <h4>Randomization — pools</h4>
+      <p>A pool is a set of pages from which each participant is shown a given number. With four
+        pages and a show count of two there are six possible combinations, and each participant
+        gets one. A survey can hold several independent pools at once, for instance one assigning
+        the experimental condition and another varying the order of vignettes; they do not
+        interfere with each other.</p>
+
+      <h4>Randomization — balanced allocation</h4>
+      <p>Each participant is assigned the combination with the lowest count so far, with ties
+        broken at random. This keeps the arms level without participant-level blocking.</p>
+      <p>The count is <strong>completed responses</strong>, not page loads, plus any assignment
+        issued in the last hour so that simultaneous starts do not all land on the same arm.
+        Someone who opens the link and leaves therefore stops affecting the balance once the hour
+        is up. The randomization page shows both figures, as <em>Completed</em> and
+        <em>In progress</em>.</p>
+
+      <h4>Randomization — condition variable</h4>
+      <p>Available when the show count is 1. Name a variable and the assigned condition is
+        exposed to the questionnaire before it renders, ready for use in visibility rules on any
+        page:</p>
+      <pre>"visibleIf": "{condition} = 'A' or {condition} = 'C'"</pre>
+      <p>The value comes from the optional value map, or is the page name itself when no map is
+        set. A map turns page names into something readable:</p>
+      <pre>{"info_a": "control", "info_b": "treatment"}</pre>
+      <p>Changing a pool's configuration clears its balance history, since the old counts no
+        longer describe the new set of combinations.</p>
+
+      <h4>Files</h4>
+      <p>Each survey has its own upload folder, so two surveys can hold files of the same name
+        without colliding. Images, PDFs and SVGs are accepted (jpg, jpeg, png, gif, webp, svg,
+        pdf), up to 10 MB each.</p>
+      <p>An uploaded file is served at a stable path you reference directly from the
+        questionnaire schema:</p>
+      <pre>/uploads/{{ slug }}/diagram.png</pre>
+      <p>Use it in an image question, or in the HTML of any element:</p>
+      <pre>{
+  "type": "image",
+  "name": "stimulus",
+  "imageLink": "/uploads/{{ slug }}/diagram.png"
+}</pre>
+      <p>The reference data shipped with the platform (cantons and countries, in EN, DE, FR and
+        IT) is uploaded the same way and can then be reused across surveys, which is how a
+        country drop-down gets its options without hard-coding them into every schema.</p>
+    </div>
+  </div>
+
   <header>
     <div class="brand">Survey Admin</div>
     <span class="sub">{{ title }}</span>
@@ -176,7 +351,11 @@
     </section>
 
     <section>
-      <h2>Configuration</h2>
+      <div class="section-head">
+        <h2>Configuration</h2>
+        <button class="help-btn" onclick="openHelp('config-help')"
+                title="Randomization and files">?</button>
+      </div>
       <div class="config-item">
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/randomization">Randomization</a>
         <span class="config-desc">{{ pool_count }} pool{{ '' if pool_count == 1 else 's' }} configured</span>
@@ -188,7 +367,11 @@
     </section>
 
     <section>
-      <h2>Panel recruitment</h2>
+      <div class="section-head">
+        <h2>Panel recruitment</h2>
+        <button class="help-btn" onclick="openHelp('panel-help')"
+                title="Recruiting through a panel provider">?</button>
+      </div>
 
       {% if panel_saved %}<div class="notice notice-ok">Panel settings saved.</div>{% endif %}
       {% if panel_error %}<div class="notice notice-err">{{ panel_error }}</div>{% endif %}
@@ -229,20 +412,9 @@
       <div class="doc">
         <p><strong>Entry URL to give the provider</strong></p>
         <pre>{{ public_url }}?{{ panel.param }}=<em>[respondent id]</em></pre>
-        <p>Respondents arriving without a valid token are stopped before the questionnaire and
-          sent to the screenout URL, and a token that has already produced a response is refused.
-          To walk the questionnaire yourself, append <code>?preview=1</code> while signed in.</p>
-        <p style="margin-top:0.9rem"><strong>Sending a respondent to screenout or quota full</strong></p>
-        <p>Set <code>_outcome</code> anywhere in the questionnaire and the return URL follows it.
-          The usual case is a consent or eligibility gate:</p>
-        <pre>"triggers": [{
-  "type": "setvalue",
-  "expression": "{consent} empty",
-  "setToName": "_outcome",
-  "setValue": "screenout"
-}]</pre>
-        <p>Accepted values are <code>complete</code> (the default), <code>screenout</code> and
-          <code>quotafull</code>. The response is stored either way, so refusals stay in the data.</p>
+        <p>Panel mode is on. Respondents without a valid token are stopped before the
+          questionnaire; append <code>?preview=1</code> to walk it yourself while signed in.
+          See <a href="#" onclick="openHelp('panel-help'); return false;">how this works</a>.</p>
       </div>
       {% endif %}
     </section>
@@ -265,6 +437,23 @@
   </main>
 
   <script>
+    function openHelp(id)  { document.getElementById(id).classList.add('open'); }
+    function closeHelp(id) { document.getElementById(id).classList.remove('open'); }
+
+    // close on backdrop click (but not on clicks inside the panel) and on Escape
+    document.querySelectorAll('.modal-overlay').forEach(function(o) {
+      o.addEventListener('click', function(e) {
+        if (e.target === o) o.classList.remove('open');
+      });
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.modal-overlay.open').forEach(function(o) {
+          o.classList.remove('open');
+        });
+      }
+    });
+
     function copyUrl() {
       var btn = document.querySelector('.url-box button');
       navigator.clipboard.writeText(document.getElementById('public-url').textContent).then(function() {
