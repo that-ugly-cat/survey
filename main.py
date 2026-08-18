@@ -299,8 +299,7 @@ async def twofa_page(request: Request):
     db.close()
     if not user:                         # no pending session → back to login
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("twofa.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "twofa.html", {
         "enrolled": bool(user["totp_enabled"]),
         "email": user["email"],
     })
@@ -507,8 +506,7 @@ async def root(request: Request, error: int = 0, reg_error: str = "", tab: str =
     db.close()
     if user:
         return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("landing.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "landing.html", {
         "error": error,
         "reg_error": reg_error,
         "tab": "register" if (tab == "register" or reg_error) else "login",
@@ -522,8 +520,9 @@ def _panel_stop(request, heading: str, message: str, redirect: str | None, statu
     if redirect:
         return RedirectResponse(redirect, status_code=302)
     return templates.TemplateResponse(
+        request,
         "panel_stop.html",
-        {"request": request, "heading": heading, "message": message},
+        {"heading": heading, "message": message},
         status_code=status,
     )
 
@@ -536,7 +535,7 @@ async def survey_page(request: Request, slug: str):
     ).fetchone()
     if not row:
         db.close()
-        return templates.TemplateResponse("closed.html", {"request": request}, status_code=404)
+        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
 
     # --- panel gate ---
     panel = _panel_config(row)
@@ -606,8 +605,7 @@ async def survey_page(request: Request, slug: str):
     pool_pages = pool_pages_list or None
     db.close()
 
-    return templates.TemplateResponse("survey.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "survey.html", {
         "title": row["title"],
         "slug": slug,
         "schema": json.loads(row["schema_json"]),
@@ -692,8 +690,8 @@ async def admin_home(request: Request):
             ORDER BY s.created_at DESC
         """, (user["id"],)).fetchall()
     db.close()
-    return templates.TemplateResponse("admin.html", {
-        "request": request, "surveys": surveys, "user": user,
+    return templates.TemplateResponse(request, "admin.html", {
+        "surveys": surveys, "user": user,
     })
 
 
@@ -779,8 +777,7 @@ async def manage_survey(slug: str, request: Request):
     public_url = f"{scheme}://{host}/s/{slug}"
 
     panel = _panel_config(row) or {}
-    return templates.TemplateResponse("manage.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "manage.html", {
         "user": user,
         "slug": slug,
         "title": row["title"],
@@ -862,8 +859,7 @@ async def edit_survey_page(slug: str, request: Request):
     db.close()
     if not row:
         return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("edit.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "edit.html", {
         "slug": slug,
         "title": row["title"],
         "schema_json": json.dumps(json.loads(row["schema_json"]), indent=2, ensure_ascii=False),
@@ -980,8 +976,7 @@ async def randomization_page(slug: str, request: Request):
             "pending_total": sum(c["pending"] for c in counts),
         })
     db.close()
-    return templates.TemplateResponse("randomization.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "randomization.html", {
         "slug": slug,
         "title": survey["title"],
         "page_names": page_names,
@@ -1114,8 +1109,7 @@ async def files_page(slug: str, request: Request):
         return RedirectResponse("/admin", status_code=302)
     d = _upload_dir(slug)
     files = sorted(os.listdir(d))
-    return templates.TemplateResponse("files.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "files.html", {
         "slug": slug,
         "title": row["title"],
         "files": files,
@@ -1363,8 +1357,8 @@ async def profile_page(request: Request, ok: str = "", error: str = ""):
     db.close()
     if not user:
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("profile.html", {
-        "request": request, "user": user, "ok": ok, "error": error,
+    return templates.TemplateResponse(request, "profile.html", {
+        "user": user, "ok": ok, "error": error,
     })
 
 
@@ -1427,8 +1421,8 @@ async def admin_users(request: Request, tmp_uid: int = 0, tmp_password: str = ""
         ORDER BY u.created_at
     """).fetchall()
     db.close()
-    return templates.TemplateResponse("admin_users.html", {
-        "request": request, "user": user, "users": users,
+    return templates.TemplateResponse(request, "admin_users.html", {
+        "user": user, "users": users,
         "tmp_uid": tmp_uid, "tmp_password": tmp_password,
     })
 
