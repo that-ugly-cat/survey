@@ -96,6 +96,16 @@ def init_db():
     if "owner_id" not in survey_cols:
         db.execute("ALTER TABLE surveys ADD COLUMN owner_id INTEGER REFERENCES users(id)")
 
+    # The immutable subject an upstream SSO gate knows this person by, when
+    # there is one. Null until map_borant.py links them, and never the email:
+    # an address changes with an institution, and this is what has to survive
+    # that change and keep someone attached to the surveys they own.
+    user_cols = {r[1] for r in db.execute("PRAGMA table_info(users)").fetchall()}
+    if "borant_sub" not in user_cols:
+        db.execute("ALTER TABLE users ADD COLUMN borant_sub TEXT")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_borant_sub "
+                   "ON users(borant_sub)")
+
     # migrate single-pool schema to multi-pool if needed
     has_rand_pools = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='rand_pools'"
@@ -234,6 +244,11 @@ async def login_page(error: int = 0):
 
 @app.post("/login")
 async def login(email: str = Form(...), password: str = Form(...)):
+    # In gateway mode the app switches its own login off rather than trusting
+    # the proxy to hide it: two sets of credentials for one tool is exactly what
+    # the SSO is there to remove.
+    if auth.gateway_mode():
+        return RedirectResponse("/", status_code=302)
     db = get_db()
     user = db.execute(
         "SELECT * FROM users WHERE email = ? AND is_active = 1", (email.strip().lower(),)
@@ -254,6 +269,10 @@ async def register_page():
 
 @app.post("/register")
 async def register(name: str = Form(...), email: str = Form(...), password: str = Form(...)):
+    # Open registration is a `local` affordance. Behind the gate, who gets an
+    # account is the gate's decision and arriving here would make a second one.
+    if auth.gateway_mode():
+        return RedirectResponse("/", status_code=302)
     email = email.strip().lower()
     name = name.strip()
     if not EMAIL_RE.match(email):
@@ -280,9 +299,15 @@ async def register(name: str = Form(...), email: str = Form(...), password: str 
     return response
 
 
+BORANT_LOGOUT_URL = os.getenv("BORANT_LOGOUT_URL", "https://id.borant.eu/logout")
+
+
 @app.get("/logout")
 async def logout():
-    response = RedirectResponse("/login", status_code=302)
+    # In gateway mode dropping the local cookie is not signing out: the gate
+    # still holds the session, and the next click walks straight back in.
+    target = BORANT_LOGOUT_URL if auth.gateway_mode() else "/login"
+    response = RedirectResponse(target, status_code=302)
     response.delete_cookie("session")
     return response
 

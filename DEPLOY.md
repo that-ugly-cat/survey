@@ -120,3 +120,68 @@ surveys have file attachments.
 
 `data/` is owned by the user running the deployment, not by root, so neither backups nor
 exports need `sudo`.
+
+## Behind an SSO gate (`AUTH_MODE=gateway`)
+
+Optional, and off unless you switch it on. In `gateway` the researcher side —
+the admin dashboard, the survey editor, the exports — is guarded by an upstream
+`forward_auth` gate instead of the local password, `/login` and `/register`
+switch themselves off, and "log out" goes to `BORANT_LOGOUT_URL`.
+
+**Respondents never meet any of it, and that is the whole constraint.** A
+questionnaire is answered by people who have no account here and must never be
+asked for one, so `/s/{slug}` and its submit route stay open.
+
+**`/uploads/*` stays open too, and this is the one that would bite quietly.**
+The editor tells the survey author to reference uploaded files from inside a
+question — `"imageLink": "/uploads/{slug}/diagram.png"` is in the on-screen help
+— and the shared canton/country lists live under `/uploads/shared/`. Gate that
+prefix and the questionnaire still loads while every image in it silently
+redirects to a sign-in page. No survey references it today, which is exactly
+what makes it a trap: it arms itself the next time somebody adds a picture.
+
+```
+survey.example.com {
+    @public path /s/* /uploads/* /login /register /logout /2fa /api/2fa/*
+    handle @public {
+        import noforge
+        import nocookie
+        reverse_proxy localhost:8001
+    }
+    handle {
+        import borantid
+        reverse_proxy localhost:8001
+    }
+}
+```
+
+Note that `/` is **not** public: it is the researcher landing page with the
+login form on it, not a page respondents ever see.
+
+**Ask the gate for `two_factor`, not `one_factor`.** In `local` this app
+enforces its own TOTP — the session cookie only reaches scope `full` after the
+second factor — so a gate configured for one factor would turn switching it on
+into a downgrade. The policy belongs on everything the gate guards here, not
+only on `/admin`: the exports under `/admin/surveys/{slug}/export.*` are the
+respondents' data, and so is the dashboard that lists it.
+
+**Link the existing researchers before switching on, and read the report:**
+
+```bash
+docker exec survey python map_borant.py --map you@example.org=01ABC…
+docker exec survey python map_borant.py --report
+```
+
+`BORANT_TRUSTED_PROXY` is the second lock and the setting people get wrong.
+Under Docker the container sees a bridge gateway, not `127.0.0.1`:
+
+```bash
+curl -s -o /dev/null http://127.0.0.1:8001/ && docker logs survey 2>&1 | tail -1
+```
+
+Rollback, two lines and no data migration:
+
+```bash
+sed -i 's/^AUTH_MODE=gateway/AUTH_MODE=local/' .env
+docker compose up -d
+```

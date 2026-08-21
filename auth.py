@@ -11,14 +11,72 @@ Passwords are bcrypt-hashed. The session cookie is a signed, timestamped
 itsdangerous token carrying {uid, scope}; the max age enforced at load time
 depends on the scope.
 """
+import ipaddress
+import logging
 import os
+import secrets
 import time
 from datetime import datetime, timezone
 
 import bcrypt
 from itsdangerous import BadData, URLSafeTimedSerializer
 
+log = logging.getLogger("survey.auth")
+
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")
+
+# Two ways of recognising a researcher, and `local` is the default on purpose:
+# an app that believes an identity header with nothing in front of it lets in
+# anyone who sends that header.
+#
+#   local     password + TOTP against the users table, as it has always worked
+#   gateway   an upstream SSO gate vouches for the caller via X-Borant-*
+#
+# What does NOT change in either mode: respondents. A questionnaire is answered
+# by people who have no account here and must never be asked for one, so
+# /s/{slug} and its submit route stay open on both sides of this switch.
+#
+# On the second factor: in `local` this app enforces its own TOTP, and the
+# two-scope cookie above is how. In `gateway` that check moves to the gate,
+# which is asked for `two_factor` on everything it guards — deliberately, so
+# that turning the gate on does not quietly become a downgrade.
+AUTH_MODE = os.getenv("AUTH_MODE", "local").strip().lower()
+
+# In gateway mode identity headers are believed only from here — the reverse
+# proxy, never the internet. Under Docker this is a bridge gateway and NOT
+# 127.0.0.1; DEPLOY.md shows how to read the real value off a running container.
+TRUSTED_PROXY = os.getenv("BORANT_TRUSTED_PROXY", "127.0.0.1")
+
+
+def _parse_trusted(raw: str) -> list:
+    nets = []
+    for chunk in raw.replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(chunk, strict=False))
+        except ValueError:
+            log.warning("BORANT_TRUSTED_PROXY: ignoring %r, not an address or CIDR", chunk)
+    return nets
+
+
+TRUSTED_PROXIES = _parse_trusted(TRUSTED_PROXY)
+
+
+def gateway_mode() -> bool:
+    return AUTH_MODE == "gateway"
+
+
+def _from_trusted_proxy(request) -> bool:
+    peer = request.client.host if request.client else None
+    if not peer:
+        return False
+    try:
+        addr = ipaddress.ip_address(peer)
+    except ValueError:
+        return False
+    return any(addr in net for net in TRUSTED_PROXIES)
 
 _serializer = URLSafeTimedSerializer(SECRET_KEY, salt="survey-session")
 
@@ -76,8 +134,53 @@ def _user_by_id(db, uid: int):
     ).fetchone()
 
 
+def user_from_gateway(request, db):
+    """The researcher the gate vouched for, or None.
+
+    Lookup is by `borant_sub` and never by email: surveys hang off `owner_id`,
+    and an address that changes with an institution is the wrong thing to
+    re-find someone by. An unknown subject gets a profile — they have a grant,
+    so they may use the tool; what they get is an empty list of surveys, not
+    somebody else's.
+    """
+    if not gateway_mode():
+        return None
+    sub = request.headers.get("x-borant-sub")
+    if not sub:
+        return None
+    if not _from_trusted_proxy(request):
+        log.warning("X-Borant-Sub from %s, outside BORANT_TRUSTED_PROXY (%s): ignored",
+                    request.client.host if request.client else "?", TRUSTED_PROXY)
+        return None
+
+    row = db.execute("SELECT * FROM users WHERE borant_sub = ? AND is_active = 1",
+                     (sub,)).fetchone()
+    if row:
+        return row
+
+    email = (request.headers.get("x-borant-email", "") or f"{sub}@borant.invalid").strip().lower()
+    name = request.headers.get("x-borant-name", "") or email
+    # A local password nobody knows, rather than none: `AUTH_MODE=local` has to
+    # stay a working way back, and a row with no password is not a way back.
+    db.execute(
+        "INSERT INTO users (email, name, hashed_password, is_admin, is_active, borant_sub) "
+        "VALUES (?, ?, ?, 0, 1, ?)",
+        (email, name, hash_password(secrets.token_urlsafe(32)), sub))
+    db.commit()
+    log.info("gateway: new profile for %s (%s)", email, sub)
+    return db.execute("SELECT * FROM users WHERE borant_sub = ?", (sub,)).fetchone()
+
+
 def current_user(request, db):
-    """Fully authenticated (2FA-completed) active user, or None."""
+    """Fully authenticated active user, or None.
+
+    In `local` that means the two-scope cookie has reached "full", i.e. the TOTP
+    step is done. In `gateway` the gate has already applied whatever level its
+    policy asks for — `two_factor` here — so a request that arrives at all has
+    cleared the same bar, one storey up.
+    """
+    if gateway_mode():
+        return user_from_gateway(request, db)
     loaded = _load(request.cookies.get("session"))
     if not loaded:
         return None
