@@ -178,3 +178,21 @@ proxy, backups).
 Copyright (C) 2026 Giovanni Spitale. Licensed under AGPL-3.0 — fork it, host it, sell access
 to it, but keep it closed-source and you're in violation. No SaaS forks that don't share
 back. See [LICENSE](LICENSE).
+
+## Optional: behind an SSO gate
+
+`AUTH_MODE=gateway` hands researcher identity to an upstream `forward_auth` gate
+instead of the local password, and `/login` and `/register` switch themselves
+off.
+
+**Respondents never meet it.** A questionnaire is answered by people with no
+account here, so `/s/{slug}`, its submit route and `/uploads/*` all stay open —
+the last one matters because questions can reference uploaded files, and the
+shared canton/country lists live there.
+
+If you turn it on, configure the gate for **two factors**: this app enforces its
+own TOTP in `local` mode, so a gate set to one would make the switch a
+downgrade rather than a move.
+
+`local` is the default and stays fully supported. Details, and the one-off
+linking script to run first, in `DEPLOY.md`.
