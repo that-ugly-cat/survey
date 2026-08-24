@@ -29,6 +29,9 @@ or JSON.
   pages, show-count and balancing counters. Balancing is driven by *completed responses*
   rather than page loads, plus a one-hour window of in-flight assignments so that concurrent
   starts spread out; an abandoned session stops skewing the arms once it ages out.
+  A pool can also **counterbalance presentation order**: alongside the condition it assigns,
+  an optional page-order map reshuffles named pages into the positions they already occupy,
+  so a crossover arm needs no duplicate pages — and therefore no duplicate question names.
 - **Panel recruitment** — enter respondents from a demoscopic provider (Bilendi, Dynata,
   Cint, Toluna…) and return them so the provider can credit their participation: a
   configurable token parameter read from the entry URL, three return URLs (complete,

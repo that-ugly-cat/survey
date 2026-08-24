@@ -381,6 +381,13 @@ def _pool_page_note(pool, page_name) -> str:
         cmap = pool.get("condition_map") or {}
         value = cmap.get(page_name, page_name)
         text += f" When this page is drawn, the variable “{pool['condition_var']}” is set to “{value}”."
+        porder = (pool.get("page_order") or {}).get(value)
+        if isinstance(porder, list) and len(porder) > 1:
+            text += (
+                " In this condition the pages "
+                + ", ".join(f"“{p}”" for p in porder)
+                + " are presented in that order."
+            )
     elif sc == 1 and re.match(r"^info_([a-z])$", page_name, re.I):
         letter = page_name.split("_")[1].upper()
         text += f" When this page is drawn, the variable “condition” is set to “{letter}” (legacy naming convention)."
@@ -502,11 +509,18 @@ def pools_from_rows(rows) -> list:
                 cmap = json.loads(r["condition_map"])
             except (json.JSONDecodeError, TypeError):
                 cmap = None
+        porder = None
+        try:
+            if r["page_order"]:
+                porder = json.loads(r["page_order"])
+        except (IndexError, KeyError, json.JSONDecodeError, TypeError):
+            porder = None
         pools.append({
             "pool_name": r["pool_name"],
             "pool_pages": json.loads(r["pool_pages"]),
             "show_count": r["show_count"],
             "condition_var": r["condition_var"],
             "condition_map": cmap,
+            "page_order": porder,
         })
     return pools
