@@ -98,7 +98,7 @@ Two things have to be right at deploy time:
   request.
 - **The proxy passes `/mcp` through.** It carries its own key, so it must not sit behind the
   SSO gate: an assistant cannot complete an interactive sign-in. Under `AUTH_MODE=gateway`,
-  add `/mcp*` to the public prefixes alongside `/s/*` and `/uploads/*`.
+  add `/mcp /mcp/*` to the public prefixes alongside `/s/*` and `/uploads/*`.
 
 Check it answers, with a key from `/admin`:
 
@@ -165,14 +165,14 @@ prefix and the questionnaire still loads while every image in it silently
 redirects to a sign-in page. No survey references it today, which is exactly
 what makes it a trap: it arms itself the next time somebody adds a picture.
 
-**`/mcp*` has to be public as well, for a different reason.** It is not open: it
+**`/mcp` and `/mcp/*` have to be public as well, for a different reason.** It is not open: it
 carries its own per-user key and refuses without one. But it cannot sit behind
 the gate, because an assistant cannot complete an interactive sign-in — put it
 there and every call comes back as a redirect to a login page.
 
 ```
 survey.example.com {
-    @public path /s/* /uploads/* /mcp* /login /register /logout /2fa /api/2fa/*
+    @public path /s/* /uploads/* /mcp /mcp/* /login /register /logout /2fa /api/2fa/*
     handle @public {
         import noforge
         import nocookie
