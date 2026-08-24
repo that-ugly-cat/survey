@@ -157,11 +157,13 @@ three questions: what does it look like now, what would a participant in each ar
 walk through, and what did the last change break. The admin UI answers the first. `/mcp`
 answers all three, from inside the conversation where the editing is happening.
 
-**Getting a key.** Mint one on `/admin`, under **MCP keys**. A key is a credential of a
-person, not of the installation: every call resolves to its owner and then goes through the
-same ownership check the web app applies, so it reaches that user's surveys and nothing else.
-A survey the caller cannot manage reports "not found" rather than "forbidden". Revoking is
-immediate, and the row stays so that a key's last use is still visible afterwards.
+**Getting a key.** Generate one on `/admin`, under **MCP key**: one per user, held on the
+user row. A key is a credential of a person, not of the installation — every call resolves to
+its owner and then goes through the same ownership check the web app applies, so it reaches
+that user's surveys and nothing else, and a survey the caller cannot manage reports "not
+found" rather than "forbidden". Disabling the account closes the key with it; there is no
+second door. Regenerating replaces the key immediately, which also means revocation is
+all-or-nothing: anything else still configured with the old one stops working too.
 
 **Connecting.** `https://your-domain/mcp` with an `X-API-Key` header, or
 `https://your-domain/mcp/k/<key>` for clients that cannot send headers. `PUBLIC_URL` must be

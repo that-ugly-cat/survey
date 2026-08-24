@@ -214,18 +214,21 @@ def new_api_key() -> str:
 
 
 def check_api_key(db, key: str):
-    """The active user row behind this key, or None. Stamps last_used_at so a
-    key still in use somewhere is visible in the admin list."""
+    """The active user holding this key, or None. Stamps the last use, so a key
+    still configured somewhere is visible on the dashboard.
+
+    A disabled account cannot be reached through its key either: `is_active` is
+    the same switch the web login honours, and there is no second door.
+    """
     if not key:
         return None
     row = db.execute(
-        """SELECT u.* FROM api_keys k JOIN users u ON u.id = k.user_id
-           WHERE k.key = ? AND k.active = 1 AND u.is_active = 1""",
-        (key,),
+        "SELECT * FROM users WHERE mcp_key = ? AND is_active = 1", (key,)
     ).fetchone()
     if not row:
         return None
-    db.execute("UPDATE api_keys SET last_used_at = datetime('now') WHERE key = ?", (key,))
+    db.execute("UPDATE users SET mcp_key_last_used_at = datetime('now') WHERE id = ?",
+               (row["id"],))
     db.commit()
     return row
 

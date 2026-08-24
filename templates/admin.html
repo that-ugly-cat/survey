@@ -88,7 +88,7 @@
       padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed;
       word-break: break-all;
     }
-    tr.revoked { opacity: 0.45; }
+    .row-actions { display: flex; gap: 0.4rem; }
     .inline-form { display: flex; gap: 0.6rem; align-items: center; margin-top: 1rem; }
     .inline-form input {
       flex: 1; max-width: 28rem; background: #0f1117; border: 1px solid #2d3148;
@@ -255,32 +255,34 @@
     </section>
 
     <section>
-      <h2>MCP keys</h2>
-      <p class="hint">A key lets an assistant read and edit your surveys from inside a
+      <h2>MCP key</h2>
+      <p class="hint">Your key lets an assistant read and edit your surveys from inside a
       conversation — structure, randomization arms, responses. It carries <em>your</em>
-      identity, so it reaches your surveys and nothing else. Revoke one and it stops
-      working immediately.</p>
+      identity, so it reaches your surveys and nothing else, and it can do nothing you
+      could not do here. You get one; regenerating replaces it, and anything still holding
+      the old one stops working at once.</p>
 
-      {% if api_keys %}
+      {% if user.mcp_key %}
       <table>
-        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <thead><tr><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
         <tbody>
-          {% for k in api_keys %}
-          <tr{% if not k.active %} class="revoked"{% endif %}>
-            <td>{{ k.name }}</td>
-            <td><code class="key">{{ k.key if k.active else '— revoked —' }}</code></td>
-            <td>{{ k.created_at }}</td>
-            <td>{{ k.last_used_at or 'never' }}</td>
+          <tr>
+            <td><code class="key">{{ user.mcp_key }}</code></td>
+            <td>{{ user.mcp_key_created_at or '—' }}</td>
+            <td>{{ user.mcp_key_last_used_at or 'never' }}</td>
             <td>
-              {% if k.active %}
-              <form method="post" action="/admin/keys/{{ k.id }}/revoke"
-                    onsubmit="return confirm('Revoke “{{ k.name }}”? Anything using it stops working.')">
-                <button class="btn-sm btn-danger">Revoke</button>
-              </form>
-              {% endif %}
+              <div class="row-actions">
+                <form method="post" action="/admin/mcp-key"
+                      onsubmit="return confirm('Regenerate? Anything using the current key stops working.')">
+                  <button class="btn-sm btn-export">Regenerate</button>
+                </form>
+                <form method="post" action="/admin/mcp-key/revoke"
+                      onsubmit="return confirm('Revoke your MCP key?')">
+                  <button class="btn-sm btn-danger">Revoke</button>
+                </form>
+              </div>
             </td>
           </tr>
-          {% endfor %}
         </tbody>
       </table>
       <p class="hint">Endpoint: <code>{{ public_url or 'https://survey.borant.eu' }}/mcp</code>
@@ -288,13 +290,11 @@
       <code>{{ public_url or 'https://survey.borant.eu' }}/mcp/k/&lt;key&gt;</code>
       for clients that cannot send headers.</p>
       {% else %}
-        <p class="empty">No keys yet.</p>
-      {% endif %}
-
-      <form method="post" action="/admin/keys" class="inline-form">
-        <input type="text" name="name" placeholder="What will use this key? e.g. Claude Code">
+      <p class="empty">No key yet.</p>
+      <form method="post" action="/admin/mcp-key" class="inline-form">
         <button class="btn-sm btn-export">Create key</button>
       </form>
+      {% endif %}
     </section>
   </main>
 

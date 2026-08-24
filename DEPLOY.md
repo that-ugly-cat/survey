@@ -90,7 +90,8 @@ section fails while everything else passes.
 
 ## 5b. The MCP endpoint
 
-`/mcp` is mounted inside the same app and gated by an API key, minted per user on `/admin`.
+`/mcp` is mounted inside the same app and gated by an API key — one per user, generated
+by the user on `/admin` and stored on their row.
 Two things have to be right at deploy time:
 
 - **`PUBLIC_URL` set** (§1), or the transport's DNS-rebinding check refuses every proxied
@@ -164,9 +165,14 @@ prefix and the questionnaire still loads while every image in it silently
 redirects to a sign-in page. No survey references it today, which is exactly
 what makes it a trap: it arms itself the next time somebody adds a picture.
 
+**`/mcp*` has to be public as well, for a different reason.** It is not open: it
+carries its own per-user key and refuses without one. But it cannot sit behind
+the gate, because an assistant cannot complete an interactive sign-in — put it
+there and every call comes back as a redirect to a login page.
+
 ```
 survey.example.com {
-    @public path /s/* /uploads/* /login /register /logout /2fa /api/2fa/*
+    @public path /s/* /uploads/* /mcp* /login /register /logout /2fa /api/2fa/*
     handle @public {
         import noforge
         import nocookie

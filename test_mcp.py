@@ -46,8 +46,7 @@ with TestClient(main.app):
                ("other@t", "Other", auth.hash_password("x")))
     other = db.execute("SELECT * FROM users WHERE email='other@t'").fetchone()
     key = auth.new_api_key()
-    db.execute("INSERT INTO api_keys (user_id, name, key) VALUES (?,?,?)",
-               (owner["id"], "test", key))
+    db.execute("UPDATE users SET mcp_key = ? WHERE id = ?", (key, owner["id"]))
     db.execute("INSERT INTO surveys (slug, title, schema_json, owner_id, active) "
                "VALUES ('theirs','Theirs',?,?,1)", (json.dumps(SCHEMA), other["id"]))
     db.commit(); db.close()
@@ -70,18 +69,36 @@ with TestClient(main.app):
     ok(r.status_code == 200, "the key can also travel in the path")
 
     db = main.get_db()
-    used = db.execute("SELECT last_used_at FROM api_keys WHERE key=?", (key,)).fetchone()
+    used = db.execute("SELECT mcp_key_last_used_at FROM users WHERE id=?",
+                      (owner["id"],)).fetchone()
     db.close()
-    ok(used["last_used_at"] is not None, "a used key is stamped, so a stale one is visible")
+    ok(used["mcp_key_last_used_at"] is not None,
+       "a used key is stamped, so a stale one is visible")
 
     db = main.get_db()
-    db.execute("UPDATE api_keys SET active = 0 WHERE key = ?", (key,))
+    db.execute("UPDATE users SET mcp_key = NULL WHERE id = ?", (owner["id"],))
     db.commit(); db.close()
     r = client.post("/mcp/", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
                     headers={"X-API-Key": key})
     ok(r.status_code == 401, "a revoked key stops working immediately")
-    db = main.get_db(); db.execute("UPDATE api_keys SET active = 1 WHERE key = ?", (key,))
+
+    db = main.get_db()
+    db.execute("UPDATE users SET mcp_key = ? WHERE id = ?", (key, owner["id"]))
+    db.execute("UPDATE users SET is_active = 0 WHERE id = ?", (owner["id"],))
     db.commit(); db.close()
+    r = client.post("/mcp/", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                    headers={"X-API-Key": key})
+    ok(r.status_code == 401, "a disabled account cannot be reached through its key either")
+    db = main.get_db(); db.execute("UPDATE users SET is_active = 1 WHERE id = ?",
+                                   (owner["id"],))
+    db.commit(); db.close()
+
+    db = main.get_db()
+    other_key = auth.new_api_key()
+    db.execute("UPDATE users SET mcp_key = ? WHERE id = ?", (other_key, other["id"]))
+    db.commit(); db.close()
+    ok(auth.check_api_key(main.get_db(), other_key)["id"] == other["id"],
+       "two users hold two different keys, each resolving to its own owner")
 
     print("\n--- ownership ---")
     auth.set_caller(owner)
@@ -198,16 +215,19 @@ with TestClient(main.app):
     t = main.templates.get_template("admin.html")
     class _Req:
         query_params = {}
-    html = t.render(request=_Req(), user={"name": "Me", "is_admin": 0}, surveys=[],
-                    public_url="https://survey.example",
-                    api_keys=[{"id": 1, "name": "Claude Code", "key": "svy_visible",
-                               "active": 1, "created_at": "now", "last_used_at": None},
-                              {"id": 2, "name": "Old", "key": "svy_hidden",
-                               "active": 0, "created_at": "then", "last_used_at": "then"}])
-    ok("svy_visible" in html, "an active key is shown so it can be copied")
-    ok("svy_hidden" not in html, "a revoked key's secret is not printed back")
+    holder = {"name": "Me", "is_admin": 0, "mcp_key": "svy_visible",
+              "mcp_key_created_at": "now", "mcp_key_last_used_at": None}
+    html = t.render(request=_Req(), user=holder, surveys=[],
+                    public_url="https://survey.example")
+    ok("svy_visible" in html, "the key is shown so it can be copied")
     ok("https://survey.example/mcp" in html, "the endpoint is spelled out for the client")
-    ok('action="/admin/keys"' in html, "and there is a form to mint one")
+    ok('action="/admin/mcp-key"' in html and "Regenerate" in html,
+       "and it can be regenerated or revoked")
+
+    empty = t.render(request=_Req(), user={"name": "Me", "is_admin": 0, "mcp_key": None},
+                     surveys=[], public_url="https://survey.example")
+    ok("No key yet" in empty and 'action="/admin/mcp-key"' in empty,
+       "a user without a key is offered one")
 
 print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: " + "; ".join(FAILED)))
 sys.exit(1 if FAILED else 0)
