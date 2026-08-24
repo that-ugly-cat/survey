@@ -82,6 +82,18 @@
     .btn-danger  { background: #2d1515; color: #fc8181; }
     .btn-danger:hover  { background: #3d1a1a; }
     .empty { text-align: center; color: #4a5568; padding: 2.5rem 0; font-size: 0.875rem; }
+    .hint { color: #718096; font-size: 0.8rem; line-height: 1.7; margin: 0 0 1rem; max-width: 60ch; }
+    .hint code, code.key {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed;
+      word-break: break-all;
+    }
+    .row-actions { display: flex; gap: 0.4rem; }
+    .inline-form { display: flex; gap: 0.6rem; align-items: center; margin-top: 1rem; }
+    .inline-form input {
+      flex: 1; max-width: 28rem; background: #0f1117; border: 1px solid #2d3148;
+      border-radius: 6px; color: #e2e8f0; padding: 0.5rem 0.7rem; font-size: 0.85rem;
+    }
     .help-toggle {
       background: none; border: 1px solid #2d3148; border-radius: 99px;
       color: #718096; font-size: 0.72rem; font-weight: 700;
@@ -239,6 +251,49 @@
       </table>
       {% else %}
         <p class="empty">No surveys yet — create one above.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>MCP key</h2>
+      <p class="hint">Your key lets an assistant read and edit your surveys from inside a
+      conversation — structure, randomization arms, responses. It carries <em>your</em>
+      identity, so it reaches your surveys and nothing else, and it can do nothing you
+      could not do here. You get one; regenerating replaces it, and anything still holding
+      the old one stops working at once.</p>
+
+      {% if user.mcp_key %}
+      <table>
+        <thead><tr><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code class="key">{{ user.mcp_key }}</code></td>
+            <td>{{ user.mcp_key_created_at or '—' }}</td>
+            <td>{{ user.mcp_key_last_used_at or 'never' }}</td>
+            <td>
+              <div class="row-actions">
+                <form method="post" action="/admin/mcp-key"
+                      onsubmit="return confirm('Regenerate? Anything using the current key stops working.')">
+                  <button class="btn-sm btn-export">Regenerate</button>
+                </form>
+                <form method="post" action="/admin/mcp-key/revoke"
+                      onsubmit="return confirm('Revoke your MCP key?')">
+                  <button class="btn-sm btn-danger">Revoke</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="hint">Endpoint: <code>{{ public_url or 'https://survey.borant.eu' }}/mcp</code>
+      with header <code>X-API-Key</code>, or
+      <code>{{ public_url or 'https://survey.borant.eu' }}/mcp/k/&lt;key&gt;</code>
+      for clients that cannot send headers.</p>
+      {% else %}
+      <p class="empty">No key yet.</p>
+      <form method="post" action="/admin/mcp-key" class="inline-form">
+        <button class="btn-sm btn-export">Create key</button>
+      </form>
       {% endif %}
     </section>
   </main>

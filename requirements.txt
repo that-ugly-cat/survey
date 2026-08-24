@@ -9,3 +9,4 @@ cryptography==44.0.0
 qrcode[pil]==8.0
 python-docx==1.1.2
 openpyxl==3.1.5
+mcp>=2.0,<3

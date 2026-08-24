@@ -14,6 +14,7 @@ two-factor authentication (TOTP) is mandatory for everyone.
 | `ADMIN_PASSWORD` | first run | `admin` | bootstrap admin's initial password |
 | `DB_PATH` | no | `/data/survey.db` | path to the SQLite file |
 | `UPLOADS_PATH` | no | `/data/uploads` | path to per-survey and shared file uploads |
+| `PUBLIC_URL` | for MCP | — | the public origin, e.g. `https://survey.example`. The MCP transport checks Host headers against DNS rebinding, so without this every proxied `/mcp` request is refused |
 
 Generate the two keys:
 
@@ -81,8 +82,32 @@ never touched:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && python test_panel.py && python test_panel_migration.py"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration; do python test_$t.py || exit 1; done"
 ```
+
+`test_page_order.py` needs `node` for its last section; in a container without it that one
+section fails while everything else passes.
+
+## 5b. The MCP endpoint
+
+`/mcp` is mounted inside the same app and gated by an API key — one per user, generated
+by the user on `/admin` and stored on their row.
+Two things have to be right at deploy time:
+
+- **`PUBLIC_URL` set** (§1), or the transport's DNS-rebinding check refuses every proxied
+  request.
+- **The proxy passes `/mcp` through.** It carries its own key, so it must not sit behind the
+  SSO gate: an assistant cannot complete an interactive sign-in. Under `AUTH_MODE=gateway`,
+  add `/mcp*` to the public prefixes alongside `/s/*` and `/uploads/*`.
+
+Check it answers, with a key from `/admin`:
+
+```bash
+curl -s https://yourdomain.example/mcp/ -H "X-API-Key: svy_..." -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 200
+```
+
+A 401 means the key is wrong or revoked. A 500 usually means `PUBLIC_URL` does not match the
+host the request arrived on.
 
 ## 6. Updating
 
@@ -140,9 +165,14 @@ prefix and the questionnaire still loads while every image in it silently
 redirects to a sign-in page. No survey references it today, which is exactly
 what makes it a trap: it arms itself the next time somebody adds a picture.
 
+**`/mcp*` has to be public as well, for a different reason.** It is not open: it
+carries its own per-user key and refuses without one. But it cannot sit behind
+the gate, because an assistant cannot complete an interactive sign-in — put it
+there and every call comes back as a redirect to a login page.
+
 ```
 survey.example.com {
-    @public path /s/* /uploads/* /login /register /logout /2fa /api/2fa/*
+    @public path /s/* /uploads/* /mcp* /login /register /logout /2fa /api/2fa/*
     handle @public {
         import noforge
         import nocookie

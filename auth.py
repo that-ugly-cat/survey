@@ -11,6 +11,7 @@ Passwords are bcrypt-hashed. The session cookie is a signed, timestamped
 itsdangerous token carrying {uid, scope}; the max age enforced at load time
 depends on the scope.
 """
+import contextvars
 import ipaddress
 import logging
 import os
@@ -197,3 +198,52 @@ def pending_user(request, db):
         return None
     uid, _scope = loaded
     return _user_by_id(db, uid)
+
+
+# --- MCP credentials ---
+# A key is a credential of a *person*: it carries an identity, not a set of
+# entitlements. Every model-facing call resolves to this user and then goes
+# through the same ownership check the web app applies, so the MCP surface has
+# exactly the reach of its owner and no more.
+
+_caller = contextvars.ContextVar("survey_mcp_caller", default=None)
+
+
+def new_api_key() -> str:
+    return "svy_" + secrets.token_urlsafe(32)
+
+
+def check_api_key(db, key: str):
+    """The active user holding this key, or None. Stamps the last use, so a key
+    still configured somewhere is visible on the dashboard.
+
+    A disabled account cannot be reached through its key either: `is_active` is
+    the same switch the web login honours, and there is no second door.
+    """
+    if not key:
+        return None
+    row = db.execute(
+        "SELECT * FROM users WHERE mcp_key = ? AND is_active = 1", (key,)
+    ).fetchone()
+    if not row:
+        return None
+    db.execute("UPDATE users SET mcp_key_last_used_at = datetime('now') WHERE id = ?",
+               (row["id"],))
+    db.commit()
+    return row
+
+
+def set_caller(user) -> None:
+    _caller.set(user)
+
+
+def current_caller():
+    """The user behind the API key on this request.
+
+    Raises rather than returning None: a tool that runs with no caller would run
+    with no ownership check, and failing loudly is the only safe direction.
+    """
+    user = _caller.get()
+    if user is None:
+        raise PermissionError("No authenticated caller")
+    return user
