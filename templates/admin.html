@@ -82,6 +82,18 @@
     .btn-danger  { background: #2d1515; color: #fc8181; }
     .btn-danger:hover  { background: #3d1a1a; }
     .empty { text-align: center; color: #4a5568; padding: 2.5rem 0; font-size: 0.875rem; }
+    .hint { color: #718096; font-size: 0.8rem; line-height: 1.7; margin: 0 0 1rem; max-width: 60ch; }
+    .hint code, code.key {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 4px;
+      padding: 0.1rem 0.4rem; font-size: 0.78rem; color: #63b3ed;
+      word-break: break-all;
+    }
+    tr.revoked { opacity: 0.45; }
+    .inline-form { display: flex; gap: 0.6rem; align-items: center; margin-top: 1rem; }
+    .inline-form input {
+      flex: 1; max-width: 28rem; background: #0f1117; border: 1px solid #2d3148;
+      border-radius: 6px; color: #e2e8f0; padding: 0.5rem 0.7rem; font-size: 0.85rem;
+    }
     .help-toggle {
       background: none; border: 1px solid #2d3148; border-radius: 99px;
       color: #718096; font-size: 0.72rem; font-weight: 700;
@@ -240,6 +252,49 @@
       {% else %}
         <p class="empty">No surveys yet — create one above.</p>
       {% endif %}
+    </section>
+
+    <section>
+      <h2>MCP keys</h2>
+      <p class="hint">A key lets an assistant read and edit your surveys from inside a
+      conversation — structure, randomization arms, responses. It carries <em>your</em>
+      identity, so it reaches your surveys and nothing else. Revoke one and it stops
+      working immediately.</p>
+
+      {% if api_keys %}
+      <table>
+        <thead><tr><th>Name</th><th>Key</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+        <tbody>
+          {% for k in api_keys %}
+          <tr{% if not k.active %} class="revoked"{% endif %}>
+            <td>{{ k.name }}</td>
+            <td><code class="key">{{ k.key if k.active else '— revoked —' }}</code></td>
+            <td>{{ k.created_at }}</td>
+            <td>{{ k.last_used_at or 'never' }}</td>
+            <td>
+              {% if k.active %}
+              <form method="post" action="/admin/keys/{{ k.id }}/revoke"
+                    onsubmit="return confirm('Revoke “{{ k.name }}”? Anything using it stops working.')">
+                <button class="btn-sm btn-danger">Revoke</button>
+              </form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="hint">Endpoint: <code>{{ public_url or 'https://survey.borant.eu' }}/mcp</code>
+      with header <code>X-API-Key</code>, or
+      <code>{{ public_url or 'https://survey.borant.eu' }}/mcp/k/&lt;key&gt;</code>
+      for clients that cannot send headers.</p>
+      {% else %}
+        <p class="empty">No keys yet.</p>
+      {% endif %}
+
+      <form method="post" action="/admin/keys" class="inline-form">
+        <input type="text" name="name" placeholder="What will use this key? e.g. Claude Code">
+        <button class="btn-sm btn-export">Create key</button>
+      </form>
     </section>
   </main>
 

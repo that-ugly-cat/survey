@@ -1,3 +1,4 @@
+import contextlib
 import csv
 import io
 import itertools
@@ -48,8 +49,81 @@ PANEL_OUTCOMES = ("complete", "screenout", "quotafull")
 # letting abandoned sessions skew the arms permanently.
 PENDING_ASSIGNMENT_MINUTES = 60
 
-app = FastAPI()
+# mcp_app reaches back here for get_db and the ownership check, but only at call
+# time, so importing it before `app` exists resolves the cycle cleanly.
+from mcp_app import mcp  # noqa: E402
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    os.makedirs(UPLOADS_PATH, exist_ok=True)
+    init_db()
+    app.mount("/uploads", StaticFiles(directory=UPLOADS_PATH), name="uploads")
+    # The MCP session manager has to be running for the mounted transport to
+    # answer at all; without this every call to /mcp fails with a 500 that says
+    # nothing about why.
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 templates = Jinja2Templates(directory="templates")
+
+
+# The MCP transport checks Host headers against DNS rebinding, so the public
+# domain has to be allowed or every proxied request is refused.
+def _allowed_hosts() -> list:
+    from urllib.parse import urlparse
+    hosts = ["localhost:8000", "127.0.0.1:8000", "localhost", "127.0.0.1"]
+    public = urlparse(os.environ.get("PUBLIC_URL", "")).netloc
+    if public:
+        hosts.append(public)
+    return hosts
+
+
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
+
+app.mount("/mcp", mcp.streamable_http_app(
+    streamable_http_path="/", json_response=True, stateless_http=True,
+    transport_security=TransportSecuritySettings(
+        allowed_hosts=_allowed_hosts(),
+        allowed_origins=[os.environ.get("PUBLIC_URL", "http://localhost:8000")])))
+
+
+@app.middleware("http")
+async def mcp_key_gate(request: Request, call_next):
+    """
+    Resolve the MCP caller, or refuse.
+
+    Two ways in, one table. The header is the normal path; /mcp/k/{key} carries
+    the same key as a path segment for clients that cannot set headers, and is
+    stripped before the mounted app sees it, so the MCP layer stays unaware of
+    how the caller authenticated.
+
+    Note this sits in front of /mcp only. The researcher UI keeps its own login,
+    and /s/{slug} stays open to respondents, who have no account here.
+    """
+    path = request.url.path
+    if not path.startswith("/mcp"):
+        return await call_next(request)
+
+    if path.startswith("/mcp/k/"):
+        key, _, rest = path[len("/mcp/k/"):].partition("/")
+        request.scope["path"] = "/mcp/" + rest
+        request.scope["raw_path"] = request.scope["path"].encode()
+    else:
+        key = request.headers.get("X-API-Key", "")
+
+    db = get_db()
+    try:
+        user = auth.check_api_key(db, key)
+    finally:
+        db.close()
+    auth.set_caller(user)
+    if not user:
+        return JSONResponse({"error": "missing or invalid API key"}, status_code=401)
+    return await call_next(request)
 
 
 # --- database ---
@@ -175,6 +249,24 @@ def init_db():
     """)
     if fresh_assignments:
         _backfill_assignments(db)
+
+    # MCP credentials. A key belongs to a person, never to the installation:
+    # every model-facing call resolves to `user_id` and then goes through the
+    # same _owned_survey() the web app uses, so a key reaches exactly what its
+    # owner reaches. Without that binding the MCP surface would be a hole
+    # straight through survey ownership.
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS api_keys (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name         TEXT NOT NULL,
+            key          TEXT NOT NULL UNIQUE,
+            active       INTEGER NOT NULL DEFAULT 1,
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used_at TEXT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys (user_id);
+    """)
     db.commit()
 
     _bootstrap_admin(db)
@@ -215,14 +307,6 @@ def _bootstrap_admin(db):
     # assign surveys that predate multi-user to the admin
     db.execute("UPDATE surveys SET owner_id = ? WHERE owner_id IS NULL", (admin["id"],))
     db.commit()
-
-
-@app.on_event("startup")
-def startup():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    os.makedirs(UPLOADS_PATH, exist_ok=True)
-    init_db()
-    app.mount("/uploads", StaticFiles(directory=UPLOADS_PATH), name="uploads")
 
 
 # --- auth helpers ---
@@ -734,9 +818,50 @@ async def admin_home(request: Request):
             ORDER BY s.created_at DESC
         """, (user["id"],)).fetchall()
     db.close()
+    keys = db.execute(
+        "SELECT id, name, key, active, created_at, last_used_at FROM api_keys "
+        "WHERE user_id = ? ORDER BY id DESC", (user["id"],)).fetchall()
+    db.close()
     return templates.TemplateResponse(request, "admin.html", {
-        "surveys": surveys, "user": user,
+        "surveys": surveys, "user": user, "api_keys": keys,
+        "public_url": os.environ.get("PUBLIC_URL", "").rstrip("/"),
     })
+
+
+# --- MCP keys ---
+# Minted here rather than handed out by an administrator, because a key is a
+# credential of the person holding it: it reaches exactly their surveys, so
+# there is nothing to approve.
+
+@app.post("/admin/keys")
+async def mint_key(request: Request, name: str = Form("")):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    db.execute("INSERT INTO api_keys (user_id, name, key) VALUES (?, ?, ?)",
+               (user["id"], (name or "").strip()[:60] or "MCP key", auth.new_api_key()))
+    db.commit()
+    db.close()
+    return RedirectResponse("/admin", status_code=302)
+
+
+@app.post("/admin/keys/{key_id}/revoke")
+async def revoke_key(key_id: int, request: Request):
+    """Revoked, never deleted: the row is what tells you a key existed and when
+    it was last used, which is the only trace of where it might still be
+    configured."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    db.execute("UPDATE api_keys SET active = 0 WHERE id = ? AND user_id = ?",
+               (key_id, user["id"]))
+    db.commit()
+    db.close()
+    return RedirectResponse("/admin", status_code=302)
 
 
 @app.post("/admin/surveys")
