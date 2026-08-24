@@ -181,6 +181,12 @@
       <p>Or with meaningful names:</p>
       <pre>{"info_a": "control", "info_b": "treatment"}</pre>
 
+      <h4>Page order</h4>
+      <p>Optional JSON that changes the <strong>order</strong> in which pages appear, for one condition value. Only available when <strong>Show = 1</strong> and a condition variable is set. Use it to counterbalance presentation order: a pool assigns the condition, and this map decides which page comes first.</p>
+      <pre>{"GGE_FIRST": ["vignette_gge", "vignette_pgt"]}</pre>
+      <p>The named pages are put back into the positions they already occupy in the schema, in the order listed — nothing else moves, and pages not named are untouched. A condition value with no entry keeps the schema order, so only the reversed arm needs listing.</p>
+      <p>This exists so that counterbalancing does not require duplicating pages: duplicated pages would mean duplicated question names, and the same answer landing in two different columns depending on the arm.</p>
+
       <h4>Multiple pools</h4>
       <p>Each pool is independent. A survey can have a pool for condition assignment (Show = 1, with condition variable) and a separate pool for vignette order (Show = 2, no condition variable) — they run simultaneously and don't interfere.</p>
 
@@ -239,6 +245,14 @@
           <textarea name="condition_map" rows="3"
                     placeholder='{"page_name": "value", "other_page": "other_value"}'
                     class="cond-textarea cond-field-{{ pool.id }}">{{ pool.condition_map }}</textarea>
+
+          <div class="field-label" style="margin-top:0.75rem;">
+            Page order <span class="hint-inline">(optional JSON — reorders pages for a given condition value)</span>
+          </div>
+          <textarea name="page_order" rows="3"
+                    placeholder='{"condition_value": ["page_shown_first", "page_shown_second"]}'
+                    class="cond-textarea cond-field-{{ pool.id }}">{{ pool.page_order }}</textarea>
+
           <p class="cond-na cond-na-{{ pool.id }}">Not applicable when Show &gt; 1.</p>
 
           <p class="hint">Saving resets this pool's counters.</p>

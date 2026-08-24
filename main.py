@@ -121,7 +121,8 @@ def init_db():
             pool_pages     TEXT NOT NULL DEFAULT '[]',
             show_count     INTEGER NOT NULL DEFAULT 1,
             condition_var  TEXT NULL,
-            condition_map  TEXT NULL
+            condition_map  TEXT NULL,
+            page_order     TEXT NULL
         );
         -- legacy aggregate counter, superseded by `assignments`. Kept so that
         -- an existing deployment can be backfilled from it exactly once.
@@ -138,6 +139,8 @@ def init_db():
         db.execute("ALTER TABLE rand_pools ADD COLUMN condition_var TEXT NULL")
     if "condition_map" not in cols:
         db.execute("ALTER TABLE rand_pools ADD COLUMN condition_map TEXT NULL")
+    if "page_order" not in cols:
+        db.execute("ALTER TABLE rand_pools ADD COLUMN page_order TEXT NULL")
 
     # panel recruitment config, per survey (additive)
     for col in ("panel_token_param", "panel_complete_url",
@@ -600,8 +603,10 @@ async def survey_page(request: Request, slug: str):
     pool_pages_list: list = []
     assignment_ids: list = []
     conditions: dict = {}
+    page_orders: list = []
     pools = db.execute(
-        "SELECT id, pool_pages, show_count, condition_var, condition_map FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
+        "SELECT id, pool_pages, show_count, condition_var, condition_map, page_order "
+        "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
         (row["id"],),
     ).fetchall()
     for p in pools:
@@ -626,6 +631,19 @@ async def survey_page(request: Request, slug: str):
                 else:
                     value = page
                 conditions[cvar] = value
+                # optional page reordering, keyed by the condition value just
+                # assigned. Only the sequence matters: the named pages are put
+                # back into the slots they already occupy, in the order given,
+                # so a pool can counterbalance presentation order without
+                # duplicating pages (and question names) in the schema.
+                porder_raw = p["page_order"]
+                if porder_raw:
+                    try:
+                        pmap = json.loads(porder_raw)
+                    except (json.JSONDecodeError, TypeError):
+                        pmap = None
+                    if isinstance(pmap, dict) and isinstance(pmap.get(value), list):
+                        page_orders.append({"var": cvar, "pages": pmap[value]})
     assigned_pages = assigned_pages_list or None
     pool_pages = pool_pages_list or None
     db.close()
@@ -638,6 +656,7 @@ async def survey_page(request: Request, slug: str):
         "pool_pages": pool_pages,
         "assignment_ids": assignment_ids,
         "conditions": conditions,
+        "page_orders": page_orders,
         "panel_token": panel_token,
     })
 
@@ -977,7 +996,8 @@ async def randomization_page(slug: str, request: Request):
     schema = json.loads(survey["schema_json"])
     page_names = [p.get("name", f"page{i+1}") for i, p in enumerate(schema.get("pages", []))]
     pools_raw = db.execute(
-        "SELECT id, pool_name, pool_order, pool_pages, show_count, condition_var, condition_map FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
+        "SELECT id, pool_name, pool_order, pool_pages, show_count, condition_var, "
+        "condition_map, page_order FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
         (survey["id"],),
     ).fetchall()
     pools_data = []
@@ -996,6 +1016,7 @@ async def randomization_page(slug: str, request: Request):
             "show_count": pool["show_count"],
             "condition_var": pool["condition_var"] or "",
             "condition_map": pool["condition_map"] or "",
+            "page_order": pool["page_order"] or "",
             "counts": counts,
             "total": sum(c["count"] for c in counts),
             "pending_total": sum(c["pending"] for c in counts),
@@ -1056,8 +1077,10 @@ async def save_pool(slug: str, pool_id: int, request: Request):
     except ValueError:
         show_count = 1
     condition_var = form.get("condition_var", "").strip() or None
-    # condition_map only valid when show_count=1; validate JSON if provided
+    # condition_map and page_order only valid when show_count=1; validate JSON
+    # if provided
     condition_map = None
+    page_order = None
     if show_count == 1 and condition_var:
         cmap_raw = form.get("condition_map", "").strip()
         if cmap_raw:
@@ -1066,9 +1089,22 @@ async def save_pool(slug: str, pool_id: int, request: Request):
                 condition_map = cmap_raw
             except json.JSONDecodeError:
                 pass  # silently discard invalid JSON
+        porder_raw = form.get("page_order", "").strip()
+        if porder_raw:
+            try:
+                parsed = json.loads(porder_raw)
+                # {condition value: [page names in the order they should appear]}
+                if isinstance(parsed, dict) and all(
+                    isinstance(v, list) for v in parsed.values()
+                ):
+                    page_order = porder_raw
+            except json.JSONDecodeError:
+                pass  # silently discard invalid JSON
     db.execute(
-        "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, condition_var = ?, condition_map = ? WHERE id = ?",
-        (pool_name, json.dumps(pool_pages), show_count, condition_var, condition_map, pool_id),
+        "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, "
+        "condition_var = ?, condition_map = ?, page_order = ? WHERE id = ?",
+        (pool_name, json.dumps(pool_pages), show_count, condition_var,
+         condition_map, page_order, pool_id),
     )
     # a configuration change invalidates the balance history for this pool
     db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool_id,))
@@ -1329,7 +1365,7 @@ async def export_review_docx(slug: str, request: Request):
         db.close()
         return JSONResponse({"error": "not found"}, status_code=404)
     pool_rows = db.execute(
-        "SELECT pool_name, pool_pages, show_count, condition_var, condition_map "
+        "SELECT pool_name, pool_pages, show_count, condition_var, condition_map, page_order "
         "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
         (row["id"],),
     ).fetchall()

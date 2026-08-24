@@ -58,6 +58,7 @@
     var pool_pages      = {{ pool_pages | tojson }};
     var assignment_ids  = {{ assignment_ids | tojson }};
     var conditions      = {{ conditions | tojson }};
+    var page_orders     = {{ page_orders | tojson }};
     var panel_token     = {{ panel_token | tojson }};
     var LANGS           = ["en", "de", "fr", "it"];
 
@@ -102,6 +103,26 @@
     }
 
     document.addEventListener("DOMContentLoaded", function() {
+      // --- randomization: reorder pages before the model is built ---
+      // A pool can assign a presentation order along with its condition. The
+      // named pages are put back into the slots they collectively occupy, in
+      // the order given, so counterbalancing needs no duplicate pages — and
+      // therefore no duplicate question names — in the schema.
+      if (page_orders && page_orders.length && schema.pages) {
+        page_orders.forEach(function(po) {
+          var idx = (po.pages || []).map(function(name) {
+            for (var i = 0; i < schema.pages.length; i++) {
+              if (schema.pages[i].name === name) return i;
+            }
+            return -1;
+          }).filter(function(i) { return i >= 0; });
+          if (idx.length < 2) return;
+          var moved = idx.map(function(i) { return schema.pages[i]; });
+          var slots = idx.slice().sort(function(a, b) { return a - b; });
+          slots.forEach(function(slot, k) { schema.pages[slot] = moved[k]; });
+        });
+      }
+
       var survey = new Survey.Model(schema);
 
       // --- randomization: hide non-assigned pool pages ---
