@@ -5,6 +5,11 @@ tmp = tempfile.mkdtemp()
 os.environ["DB_PATH"] = os.path.join(tmp, "survey.db")
 os.environ["UPLOADS_PATH"] = os.path.join(tmp, "uploads")
 os.environ["SECRET_KEY"] = "test-secret"
+# Pin the local cookie login: this test signs its own session, and a container
+# built for the gateway reads identity from the proxy headers instead, which
+# would bounce every request here to /login and pass the guard checks for the
+# wrong reason.
+os.environ["AUTH_MODE"] = "local"
 from cryptography.fernet import Fernet
 os.environ["FERNET_KEY"] = Fernet.generate_key().decode()
 sys.path.insert(0, os.path.abspath("."))
