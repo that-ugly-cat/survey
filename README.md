@@ -47,7 +47,9 @@ or JSON.
   translations exist in the schema.
 - **Per-survey manage page** — stats (responses, last response), shareable public URL with a
   ready-made **QR code**, exports, questionnaire tools, panel settings, and a danger zone that
-  spells out what a delete destroys. The survey list keeps only the everyday actions. Help
+  spells out what each destructive action destroys — **Purge answers**, which empties a survey
+  of its responses and balance while keeping the instrument, so a test run can be cleared before
+  fielding, and **Delete survey**. The survey list keeps only the everyday actions. Help
   modals behind each **?** document panel recruitment, randomization and file uploads in place,
   so the settings do not need a manual open in another window.
 - **Response exports: CSV, Excel, JSON** — CSV and Excel are guaranteed to share the same
@@ -123,12 +125,12 @@ From there:
 
 ## Checks
 
-Five self-contained scripts, no test framework and no running server. They build their own
+Six self-contained scripts, no test framework and no running server. They build their own
 temporary database, so they never touch real data:
 
 ```bash
 python test_flow.py && python test_mcp.py && python test_page_order.py
-python test_panel.py && python test_panel_migration.py
+python test_panel.py && python test_panel_migration.py && python test_purge.py
 ```
 
 `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -138,13 +140,14 @@ reorder snippet itself, extracted from `templates/survey.html` and run in node s
 cannot drift from the code it checks. `test_panel.py` covers panel entry and return, one-use
 tokens, outcome routing, and the assignment ledger. `test_panel_migration.py` upgrades a
 database in the pre-panel shape and checks the backfill, then compiles and renders every
-template.
+template. `test_purge.py` covers emptying a survey of its answers: who is allowed to, what
+goes with them, and what must survive.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one
@@ -211,6 +214,7 @@ templates/        — landing, twofa, admin, manage, admin_users, profile, surve
 static-data/      — reference JSON (cantons, countries) to upload via the file manager
 test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, assignment ledger
 test_panel_migration.py — migrating an existing database, plus template rendering
+test_purge.py     — emptying a survey of its answers: the guard, what goes, what stays
 ```
 
 ## Deployment

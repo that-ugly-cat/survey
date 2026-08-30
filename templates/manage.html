@@ -154,7 +154,12 @@
     section.danger { border-color: #7b2020; }
     section.danger h2 { color: #fc8181; }
     .danger-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .danger-row + .danger-row {
+      margin-top: 1.25rem; padding-top: 1.25rem; border-top: 1px solid #3d1a1a;
+    }
     .danger-text { flex: 1; min-width: 240px; font-size: 0.82rem; color: #a0aec0; line-height: 1.6; }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn:disabled:hover { background: #2d1515; }
   </style>
 </head>
 <body>
@@ -421,6 +426,20 @@
 
     <section class="danger">
       <h2>Danger zone</h2>
+      <div class="danger-row">
+        <p class="danger-text">
+          Purging answers permanently removes
+          <strong>{{ response_count }} response{{ '' if response_count == 1 else 's' }}</strong>
+          and the randomization balance that goes with them. The questionnaire, its
+          uploaded files and the pool configuration stay as they are, so the survey is
+          ready to field again from zero. Use it to clear test runs before going live.
+          This cannot be undone.
+        </p>
+        <form method="post" action="/admin/surveys/{{ slug }}/purge"
+              onsubmit="return confirm('Permanently delete all {{ response_count }} response{{ '' if response_count == 1 else 's' }} to “{{ title }}”, keeping the questionnaire? This cannot be undone.')">
+          <button class="btn btn-danger" {% if response_count == 0 %}disabled{% endif %}>Purge answers</button>
+        </form>
+      </div>
       <div class="danger-row">
         <p class="danger-text">
           Deleting this survey permanently removes the questionnaire,

@@ -1086,6 +1086,35 @@ async def toggle_survey(slug: str, request: Request):
     return RedirectResponse("/admin", status_code=302)
 
 
+@app.post("/admin/surveys/{slug}/purge")
+async def purge_responses(slug: str, request: Request):
+    """Empty the survey of what it has collected, keeping the questionnaire.
+
+    The balance ledger goes with the responses. Leaving it would count arms as
+    completed by respondents who no longer exist, which is the opposite of what
+    someone clearing test data before fielding is asking for; it is the same
+    pair that `reset_counters` already treats as one thing.
+    """
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    db.execute("DELETE FROM responses WHERE survey_id = ?", (row["id"],))
+    for pool in db.execute(
+        "SELECT id FROM rand_pools WHERE survey_id = ?", (row["id"],)
+    ).fetchall():
+        db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool["id"],))
+        db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool["id"],))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}", status_code=302)
+
+
 @app.post("/admin/surveys/{slug}/delete")
 async def delete_survey(slug: str, request: Request):
     db = get_db()

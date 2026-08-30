@@ -82,7 +82,7 @@ never touched:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` for its last section; in a container without it that one
