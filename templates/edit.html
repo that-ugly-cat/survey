@@ -45,6 +45,21 @@
       padding: 0.6rem 0.8rem; background: #2d1515; border: 1px solid #7b2020;
       border-radius: 6px; font-size: 0.82rem; color: #fc8181; margin-bottom: 1rem;
     }
+    .warn-msg {
+      padding: 0.7rem 0.9rem; background: #2a2113; border: 1px solid #7b5a20;
+      border-radius: 6px; font-size: 0.82rem; color: #f6c177; margin-bottom: 1rem;
+      line-height: 1.6;
+    }
+    .confirm-row {
+      display: flex; gap: 0.6rem; align-items: flex-start; margin-top: 1rem;
+      padding: 0.8rem 0.9rem; background: #0f1117; border: 1px solid #7b5a20;
+      border-radius: 6px;
+    }
+    .confirm-row input[type=checkbox] {
+      accent-color: #b7791f; width: 1rem; height: 1rem; margin-top: 0.15rem;
+      cursor: pointer; flex-shrink: 0;
+    }
+    .confirm-row label { font-size: 0.8rem; color: #a0aec0; line-height: 1.6; cursor: pointer; }
     .actions { display: flex; gap: 0.75rem; margin-top: 1rem; align-items: center; }
     .btn-primary {
       padding: 0.55rem 1.4rem;
@@ -77,6 +92,17 @@
       {% set err = request.query_params.get('error') %}
       {% if err == 'no_schema'    %}<div class="error-msg">Provide a JSON schema (file or paste).</div>{% endif %}
       {% if err == 'invalid_json' %}<div class="error-msg">Invalid JSON — check the schema syntax.</div>{% endif %}
+      {% if error_message %}<div class="error-msg">{{ error_message }}</div>{% endif %}
+
+      {% set held = responses_held | default(0) %}
+      {% if held %}
+      <div class="warn-msg">
+        This survey already holds <strong>{{ held }}</strong> response{{ 's' if held != 1 else '' }}.
+        Those answers were given to the wording that is stored now. Replacing the
+        questionnaire changes what they mean, and no backup restores the wording a
+        respondent actually read.
+      </div>
+      {% endif %}
 
       <form method="post" action="/admin/surveys/{{ slug }}/edit" enctype="multipart/form-data">
         <div class="form-row">
@@ -88,6 +114,17 @@
         <input type="file" name="schema_file" accept=".json">
         <div class="divider">— or edit JSON below —</div>
         <textarea name="schema_text" rows="24">{{ schema_json }}</textarea>
+
+        {% if held %}
+        <div class="confirm-row">
+          <input type="checkbox" name="confirm_replace" value="1" id="confirm_replace">
+          <label for="confirm_replace">
+            Replace the questionnaire over the {{ held }} response{{ 's' if held != 1 else '' }}
+            already collected, knowing that those answers were given to the old
+            wording and that this cannot be undone from a backup.
+          </label>
+        </div>
+        {% endif %}
 
         <div class="actions">
           <button type="submit" class="btn-primary">Save changes</button>

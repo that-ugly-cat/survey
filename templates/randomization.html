@@ -34,6 +34,11 @@
     }
     .pool-header input[type=text]:focus { border-color: #4a6fa5; }
 
+    .pool-error {
+      padding: 0.6rem 0.8rem; background: #2d1515; border: 1px solid #7b2020;
+      border-radius: 6px; font-size: 0.8rem; color: #fc8181;
+      margin-bottom: 1rem; line-height: 1.6;
+    }
     .field-label { font-size: 0.72rem; color: #718096; margin-bottom: 0.5rem; margin-top: 1rem; }
     .page-list { display: flex; flex-direction: column; gap: 0.35rem; }
     .page-item {
@@ -211,6 +216,9 @@
       <div class="pool-card">
         <form method="post" action="/admin/surveys/{{ slug }}/randomization/{{ pool.id }}/save"
               onsubmit="return confirm('Save pool and reset its assignment counters?')">
+          {% if error and error_pool_id == pool.id %}
+          <div class="pool-error">{{ error }}</div>
+          {% endif %}
           <div class="pool-header">
             <input type="text" name="pool_name" value="{{ pool.pool_name }}" placeholder="Pool name">
           </div>

@@ -191,7 +191,8 @@ arms that reach no questions.
 - A schema with structural errors is refused. Pass `force` to override.
 - Editing the schema of a survey that already holds responses is refused unless forced: those
   answers were given to the old wording, and reinterpreting them silently is the one mistake a
-  backup does not undo.
+  backup does not undo. The web edit form carries the same rule — it refuses until the person
+  ticks a box naming that consequence, and writes a line to the application log when they do.
 - Deleting surveys and deleting responses are **not exposed at all**. They stay in the web
   admin, where a human is holding the mouse.
 

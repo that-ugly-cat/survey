@@ -3,6 +3,7 @@ import csv
 import io
 import itertools
 import json
+import logging
 import os
 import random
 import re
@@ -26,6 +27,12 @@ import totp
 
 DB_PATH = os.getenv("DB_PATH", "/data/survey.db")
 UPLOADS_PATH = os.getenv("UPLOADS_PATH", "/data/uploads")
+
+# The application log is the only durable trace this app keeps of an
+# administrative act; there is no audit table and nothing in the export records
+# that the instrument moved. Replacing a schema over collected answers is
+# written here because it is the one change a backup does not undo.
+log = logging.getLogger("survey.admin")
 
 # Bootstrap admin — created once on first run, then owns any pre-existing surveys.
 ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@survey.local").strip().lower()
@@ -308,6 +315,12 @@ def _bootstrap_admin(db):
 
 
 # --- auth helpers ---
+
+def _response_count(db, survey_id: int) -> int:
+    return db.execute(
+        "SELECT COUNT(*) FROM responses WHERE survey_id = ?", (survey_id,)
+    ).fetchone()[0]
+
 
 def _owned_survey(db, slug: str, user):
     """The survey row if `user` may manage it (owner or admin), else None."""
@@ -835,7 +848,6 @@ async def admin_home(request: Request):
             ORDER BY s.created_at DESC
         """, (user["id"],)).fetchall()
     db.close()
-    db.close()
     return templates.TemplateResponse(request, "admin.html", {
         "surveys": surveys, "user": user,
         "public_url": os.environ.get("PUBLIC_URL", "").rstrip("/"),
@@ -1040,6 +1052,7 @@ async def edit_survey_page(slug: str, request: Request):
         db.close()
         return RedirectResponse("/login", status_code=302)
     row = _owned_survey(db, slug, user)
+    held = _response_count(db, row["id"]) if row else 0
     db.close()
     if not row:
         return RedirectResponse("/admin", status_code=302)
@@ -1047,6 +1060,7 @@ async def edit_survey_page(slug: str, request: Request):
         "slug": slug,
         "title": row["title"],
         "schema_json": json.dumps(json.loads(row["schema_json"]), indent=2, ensure_ascii=False),
+        "responses_held": held,
     })
 
 
@@ -1057,13 +1071,15 @@ async def edit_survey(
     title: str = Form(...),
     schema_file: UploadFile = File(None),
     schema_text: str = Form(""),
+    confirm_replace: str = Form(""),
 ):
     db = get_db()
     user = auth.current_user(request, db)
     if not user:
         db.close()
         return RedirectResponse("/login", status_code=302)
-    if not _owned_survey(db, slug, user):
+    row = _owned_survey(db, slug, user)
+    if not row:
         db.close()
         return RedirectResponse("/admin", status_code=302)
 
@@ -1082,12 +1098,40 @@ async def edit_survey(
         db.close()
         return RedirectResponse(f"/admin/surveys/{slug}/edit?error=invalid_json", status_code=302)
 
+    # The same rule the MCP surface has always applied, on the surface a person
+    # actually uses: answers already collected were given to the old wording, so
+    # replacing the questionnaire underneath them changes what the data means,
+    # and no backup brings back the wording a respondent read. Refused unless the
+    # person ticks the box that names that consequence — and the refusal hands
+    # back what was typed, because losing a pasted schema is not a warning.
+    held = _response_count(db, row["id"])
+    if held and not confirm_replace:
+        db.close()
+        return templates.TemplateResponse(request, "edit.html", {
+            "slug": slug,
+            "title": title,
+            "schema_json": schema_str,
+            "responses_held": held,
+            "error_message": (
+                f"This survey already holds {held} response"
+                f"{'s' if held != 1 else ''}. Replacing the questionnaire was "
+                f"refused: tick the confirmation below if that is intended. "
+                f"Nothing was saved."
+            ),
+        }, status_code=400)
+
     db.execute(
         "UPDATE surveys SET title = ?, schema_json = ? WHERE slug = ?",
         (title, schema_str, slug),
     )
     db.commit()
     db.close()
+    if held:
+        log.warning(
+            "schema of survey %r replaced over %d collected response(s) "
+            "by user %s <%s> (confirmed in the web form)",
+            slug, held, user["id"], user["email"],
+        )
     return RedirectResponse(f"/admin/surveys/{slug}", status_code=302)
 
 
@@ -1151,19 +1195,19 @@ async def delete_survey(slug: str, request: Request):
 
 # --- admin randomization ---
 
-@app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
-async def randomization_page(slug: str, request: Request):
-    db = get_db()
-    user = auth.current_user(request, db)
-    if not user:
-        db.close()
-        return RedirectResponse("/login", status_code=302)
-    survey = _owned_survey(db, slug, user)
-    if not survey:
-        db.close()
-        return RedirectResponse("/admin", status_code=302)
-    schema = json.loads(survey["schema_json"])
-    page_names = [p.get("name", f"page{i+1}") for i, p in enumerate(schema.get("pages", []))]
+def _schema_page_names(schema) -> list:
+    """The page names a pool may refer to, named the way the runtime names them."""
+    return [p.get("name", f"page{i+1}") for i, p in enumerate(schema.get("pages", []))]
+
+
+def _randomization_context(db, survey, slug: str) -> dict:
+    """Everything randomization.html renders: the schema's page names, and one
+    entry per pool with its balance table.
+
+    Split out of the GET handler so that a refused save can hand the same page
+    back with the values that were typed, instead of redirecting to a fresh one.
+    """
+    page_names = _schema_page_names(json.loads(survey["schema_json"]))
     pools_raw = db.execute(
         "SELECT id, pool_name, pool_order, pool_pages, show_count, condition_var, "
         "condition_map, page_order FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
@@ -1190,13 +1234,28 @@ async def randomization_page(slug: str, request: Request):
             "total": sum(c["count"] for c in counts),
             "pending_total": sum(c["pending"] for c in counts),
         })
-    db.close()
-    return templates.TemplateResponse(request, "randomization.html", {
+    return {
         "slug": slug,
         "title": survey["title"],
         "page_names": page_names,
         "pools": pools_data,
-    })
+    }
+
+
+@app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
+async def randomization_page(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    context = _randomization_context(db, survey, slug)
+    db.close()
+    return templates.TemplateResponse(request, "randomization.html", context)
 
 
 @app.post("/admin/surveys/{slug}/randomization/add-pool")
@@ -1235,7 +1294,8 @@ async def save_pool(slug: str, pool_id: int, request: Request):
     if not user:
         db.close()
         return RedirectResponse("/login", status_code=302)
-    if not _pool_belongs(db, slug, pool_id, user):
+    survey = _owned_survey(db, slug, user)
+    if not survey or not _pool_belongs(db, slug, pool_id, user):
         db.close()
         return RedirectResponse("/admin", status_code=302)
     form = await request.form()
@@ -1246,29 +1306,79 @@ async def save_pool(slug: str, pool_id: int, request: Request):
     except ValueError:
         show_count = 1
     condition_var = form.get("condition_var", "").strip() or None
-    # condition_map and page_order only valid when show_count=1; validate JSON
-    # if provided
+    cmap_raw = form.get("condition_map", "").strip()
+    porder_raw = form.get("page_order", "").strip()
+
+    def refuse(message: str):
+        """Hand the page back, with the reason and with what was typed still in
+        the fields.
+
+        Discarding a rejected value silently — as this route did — shows the
+        person an empty box after a save that reported success, which reads as
+        data loss with no cause. Nothing is written on this path.
+        """
+        context = _randomization_context(db, survey, slug)
+        db.close()
+        for pool in context["pools"]:
+            if pool["id"] == pool_id:
+                pool.update({
+                    "pool_name": pool_name,
+                    "pool_pages": pool_pages,
+                    "show_count": show_count,
+                    "condition_var": condition_var or "",
+                    "condition_map": cmap_raw,
+                    "page_order": porder_raw,
+                })
+        context["error"] = message
+        context["error_pool_id"] = pool_id
+        return templates.TemplateResponse(
+            request, "randomization.html", context, status_code=400)
+
+    def where(exc: json.JSONDecodeError) -> str:
+        return f"{exc.msg}, line {exc.lineno} column {exc.colno}"
+
+    # condition_map and page_order only apply when show_count = 1 with a
+    # condition variable; outside that they are dropped, as they always were.
     condition_map = None
     page_order = None
     if show_count == 1 and condition_var:
-        cmap_raw = form.get("condition_map", "").strip()
         if cmap_raw:
             try:
                 json.loads(cmap_raw)
-                condition_map = cmap_raw
-            except json.JSONDecodeError:
-                pass  # silently discard invalid JSON
-        porder_raw = form.get("page_order", "").strip()
+            except json.JSONDecodeError as exc:
+                return refuse(f"Value map is not valid JSON — {where(exc)}. "
+                              f"Nothing was saved.")
+            condition_map = cmap_raw
         if porder_raw:
             try:
                 parsed = json.loads(porder_raw)
-                # {condition value: [page names in the order they should appear]}
-                if isinstance(parsed, dict) and all(
-                    isinstance(v, list) for v in parsed.values()
-                ):
-                    page_order = porder_raw
-            except json.JSONDecodeError:
-                pass  # silently discard invalid JSON
+            except json.JSONDecodeError as exc:
+                return refuse(f"Page order is not valid JSON — {where(exc)}. "
+                              f"Nothing was saved.")
+            # {condition value: [page names in the order they should appear]}
+            if not isinstance(parsed, dict) or not all(
+                isinstance(v, list) for v in parsed.values()
+            ):
+                return refuse(
+                    "Page order must be a JSON object mapping each condition "
+                    "value to a list of page names, e.g. "
+                    '{"CONDITION": ["first_page", "second_page"]}. '
+                    "Nothing was saved.")
+            # A name that no page carries is not an error the runtime can
+            # report: the arm quietly keeps the schema order, and the mistake
+            # only ever surfaced through the MCP validator. Caught here, where
+            # it was typed.
+            known = _schema_page_names(json.loads(survey["schema_json"]))
+            for value, names in parsed.items():
+                for name in names:
+                    if name not in known:
+                        return refuse(
+                            f"Page order names a page this questionnaire does "
+                            f"not have: {name!r}, under condition value "
+                            f"{value!r}. Its pages are: "
+                            f"{', '.join(map(str, known)) or '(none)'}. "
+                            f"Nothing was saved.")
+            page_order = porder_raw
     db.execute(
         "UPDATE rand_pools SET pool_name = ?, pool_pages = ?, show_count = ?, "
         "condition_var = ?, condition_map = ?, page_order = ? WHERE id = ?",

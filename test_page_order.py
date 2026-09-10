@@ -81,27 +81,54 @@ with TestClient(main.app):
     main.auth.current_user = lambda request, db: db.execute(
         "SELECT * FROM users WHERE id=?", (owner,)).fetchone()
 
+    GOOD = {"C2": ["vignette_gge", "vignette_pgt"]}
+
     def save(**over):
+        """POST the pool form. Returns (response, page_order as stored)."""
         form = {"pool_name": "P", "pool_pages": ["info_a", "info_c"], "show_count": "1",
                 "condition_var": "condition",
                 "condition_map": json.dumps({"info_a": "A", "info_c": "C2"}),
-                "page_order": json.dumps({"C2": ["vignette_gge", "vignette_pgt"]})}
+                "page_order": json.dumps(GOOD)}
         form.update(over)
-        client.post(f"/admin/surveys/po/randomization/{pid}/save", data=form,
-                    follow_redirects=False)
+        r = client.post(f"/admin/surveys/po/randomization/{pid}/save", data=form,
+                        follow_redirects=False)
         db = main.get_db()
         row = db.execute("SELECT page_order FROM rand_pools WHERE id=?", (pid,)).fetchone()
         db.close()
-        return row["page_order"]
+        return r, row["page_order"]
 
-    stored = save()
-    ok(stored and json.loads(stored) == {"C2": ["vignette_gge", "vignette_pgt"]},
+    r, stored = save()
+    ok(r.status_code == 302 and stored and json.loads(stored) == GOOD,
        "valid page_order is stored")
-    ok(save(page_order="{not json") is None, "malformed JSON is discarded")
-    ok(save(page_order='{"C2": "vignette_gge"}') is None,
-       "values that are not lists are discarded")
-    ok(save(show_count="2") is None, "page_order is dropped when Show > 1")
-    ok(save(condition_var="") is None, "page_order is dropped without a condition variable")
+
+    # A rejected value used to vanish without a word, leaving an empty box and
+    # no reason. It is now reported, and nothing is written on that path.
+    r, stored = save(page_order="{not json")
+    ok(r.status_code == 400 and "Page order is not valid JSON" in r.text,
+       "malformed JSON is refused, and the message names the field")
+    ok("{not json" in r.text, "the typed value comes back in the textarea")
+    ok(json.loads(stored) == GOOD, "a refused save writes nothing")
+
+    r, stored = save(page_order='{"C2": "vignette_gge"}')
+    ok(r.status_code == 400 and "list of page names" in r.text,
+       "values that are not lists are refused")
+    ok(json.loads(stored) == GOOD, "and write nothing")
+
+    r, stored = save(page_order=json.dumps({"C2": ["vignette_gge", "no_such_page"]}))
+    ok(r.status_code == 400 and "no_such_page" in r.text,
+       "a page the schema lacks is refused, and the message names it")
+    ok(json.loads(stored) == GOOD, "and writes nothing")
+
+    r, stored = save(condition_map="{not json")
+    ok(r.status_code == 400 and "Value map is not valid JSON" in r.text,
+       "the same holds for the value map, named as itself")
+    ok(json.loads(stored) == GOOD, "and it writes nothing either")
+
+    r, stored = save(show_count="2")
+    ok(stored is None, "page_order is dropped when Show > 1")
+    save()  # put the good value back for the case below
+    r, stored = save(condition_var="")
+    ok(stored is None, "page_order is dropped without a condition variable")
 
 print("\n--- admin template ---")
 t = main.templates.get_template("randomization.html")
