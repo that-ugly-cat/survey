@@ -372,6 +372,17 @@ def update_schema(slug: str, schema: dict, force: bool = False) -> dict:
         db.execute("UPDATE surveys SET schema_json = ? WHERE id = ?",
                    (json.dumps(schema), row["id"]))
         db.commit()
+        if held:
+            # The web form logs the same line when a person confirms this. Two
+            # doors onto the one change a backup does not undo, and only one of
+            # them leaving a trace is the asymmetry the guard was added to end.
+            # The caller is a sqlite3.Row, which subscripts and has no .get().
+            caller = auth.current_caller()
+            main.log.warning(
+                "schema of survey %r replaced over %d collected response(s) "
+                "by user %s <%s> (forced over MCP)",
+                slug, held, caller["id"], caller["email"],
+            )
         return {"slug": slug, "responses_held": held,
                 "summary": {k: v for k, v in flow.summarise(schema).items()
                             if k != "question_names"},
