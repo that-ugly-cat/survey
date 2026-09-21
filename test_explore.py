@@ -132,13 +132,21 @@ ok(set(topics) >= {"how", "spearman", "mannwhitney", "kruskal", "chi2", "fisher"
 ok(all(t["test"] in topics for t in
        [{"test": k} for k in ("spearman", "mannwhitney", "kruskal", "chi2", "fisher")]),
    "each test name matches the topic the panel will ask for")
-ok("causa" in " ".join(topics["how"]["body"]).lower(),
-   "the reading guide says that moving together is not causing")
+ok("correlazione non è causalità" in " ".join(topics["how"]["body"]).lower(),
+   "the reading guide says that correlation is not causation")
+for lang in ("en", "it", "de", "fr"):
+    body = " ".join(RS.help_for(lang)["how"]["body"])
+    ok("tylervigen.com/spurious-correlations" in body,
+       f"and points at the spurious correlations, in {lang}")
+ok(all(len(RS.help_for(l)) == 6 for l in ("en", "it", "de", "fr")),
+   "all six topics exist in all four languages, so no page falls back any more")
+ok(RS.help_for("de")["chi2"]["title"].startswith("Chi-Quadrat"),
+   "including the ones that used to come back in English")
 ok("Pearson" in " ".join(topics["spearman"]["body"])
    and "t" in " ".join(topics["mannwhitney"]["body"]),
    "and each test says which familiar one it is standing in for")
-ok(RS.help_for("de")["chi2"]["title"].startswith("Chi-square"),
-   "a language with no translation falls back per topic rather than breaking")
+ok(RS.help_for("xx")["chi2"]["title"].startswith("Chi-square"),
+   "and a language nobody wrote still falls back per topic rather than breaking")
 
 print("\n--- the caveats travel with the answer ---")
 kinds = [c["kind"] for c in perfect["caveats"]]

@@ -433,10 +433,15 @@
     const HELP = {{ explore_help | tojson }};
     const T = {{ t | tojson }};
 
-    // Bold and italics only: these are our own paragraphs, not anybody's input.
+    // Bold, italics and links: these are our own paragraphs, not anybody's
+    // input. The href is still checked for http, because a rule that only holds
+    // while nobody edits the file is not a rule.
     function inlineMd(text) {
-      return text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-                 .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+      return text
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+                 '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
     }
 
     function showHelp(topic) {
