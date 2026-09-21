@@ -113,9 +113,9 @@ ok(served == notice.NOTICE,
    "what the browser receives is the notice, unaltered and complete")
 ok(served["it"]["sections"][0]["p"][0] == notice.NOTICE["it"]["sections"][0]["p"][0],
    "body paragraphs reach the browser, not just the headings")
-ok(notice.FOOTER in html, f"the footer line is rendered: {notice.FOOTER!r}")
-ok(html.count("data-notice-label onclick") == 2,
-   f"two openers, header and footer: {html.count('data-notice-label onclick')}")
+ok(html.count("data-notice-label onclick") == 1,
+   f"one opener, in the header: {html.count('data-notice-label onclick')}")
+ok("<footer" not in html, "no footer bar: the header alone carries the link")
 ok('id="notice"' in html and "function openNotice()" in html,
    "the modal and its opener are both present")
 

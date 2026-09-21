@@ -804,7 +804,6 @@ async def survey_page(request: Request, slug: str):
         # All four languages go down with the page: the notice follows the
         # language switcher, which changes the form without a reload.
         "notice": notice_text.NOTICE,
-        "footer_line": notice_text.FOOTER,
     })
 
 

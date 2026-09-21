@@ -1,8 +1,8 @@
 """The participant-facing notice: what this platform is, and what happens to an answer.
 
-One text, four languages, reachable from the header and the footer of every
-questionnaire. It is deliberately *not* a privacy policy: it explains how the
-tool works, in the words a person actually reads. The purpose of the research,
+One text, four languages, reachable from the header of every questionnaire. It
+is deliberately *not* a privacy policy: it explains how the tool works, in the
+words a person actually reads. The purpose of the research,
 its legal basis and its ethics approval belong to the study, and the notice
 says so rather than pretending to cover them.
 
@@ -16,8 +16,6 @@ stops being true, this file is wrong and has to change with it.
 """
 
 LANGS = ("en", "de", "fr", "it")
-
-FOOTER = "Survey · ITE Lab, University of Zurich"
 
 NOTICE = {
     "it": {
