@@ -55,6 +55,34 @@ STRINGS = {
         "as_public": "anyone",
         "previewing": "This is what {who} sees. Anything held back for them is held back here too.",
         "other": "Other",
+        "explore": "Explore", "explore_title": "Do these two move together?",
+        "explore_lede": "Pick two questions. The test is chosen from the shape of "
+                        "the answers, not by you, and what comes back is a direction "
+                        "to look in rather than a finding.",
+        "explore_x": "First variable", "explore_y": "Second variable",
+        "explore_run": "Compare", "explore_none": "Nothing to compare yet.",
+        "lbl_test": "test", "lbl_effect": "effect", "lbl_answered_both": "answered both",
+        "t_spearman": "Spearman rank correlation", "t_mannwhitney": "Mann-Whitney U",
+        "t_kruskal": "Kruskal-Wallis H", "t_chi2": "chi-square of independence",
+        "t_fisher": "Fisher exact test",
+        "e_rho": "rho", "e_rank_biserial": "rank-biserial",
+        "e_cramers_v": "Cramér's V", "e_epsilon_squared": "epsilon squared",
+        "b_negligible": "negligible", "b_small": "small",
+        "b_moderate": "moderate", "b_large": "large",
+        "c_exploratory": "Exploratory. This is a direction to look in, not a result "
+                         "to report.",
+        "c_multiple": "This questionnaire offers {pairs} pairs. Trying them all, about "
+                      "one in twenty comes out under 0.05 with nothing behind it.",
+        "c_small_n": "Only {n} people answered both, which is too few for the p-value "
+                     "to mean much.",
+        "c_small_group": "At least one group holds fewer than five people.",
+        "c_expected_small": "{cells} of {of} cells expect fewer than five, where the "
+                            "chi-square approximation is unreliable.",
+        "err_too_few": "Fewer than {minimum} people answered both questions.",
+        "err_no_variation": "One of the two never varies, so there is nothing to compare.",
+        "err_same_variable": "That is the same variable twice.",
+        "err_unknown_variable": "No such variable in this questionnaire.",
+        "th_median": "median", "th_mean": "mean",
         "everyone": "everyone", "by": "by",
     },
     "it": {
@@ -88,6 +116,35 @@ STRINGS = {
         "as_public": "chiunque",
         "previewing": "Questo è quello che vede {who}. Quello che a loro è nascosto è nascosto anche qui.",
         "other": "Altro",
+        "explore": "Esplora", "explore_title": "Queste due si muovono insieme?",
+        "explore_lede": "Scegli due domande. Il test lo sceglie la forma delle risposte, "
+                        "non tu, e quello che torna è una direzione in cui guardare, "
+                        "non un risultato.",
+        "explore_x": "Prima variabile", "explore_y": "Seconda variabile",
+        "explore_run": "Confronta", "explore_none": "Non c'è ancora niente da confrontare.",
+        "lbl_test": "test", "lbl_effect": "effetto",
+        "lbl_answered_both": "hanno risposto a entrambe",
+        "t_spearman": "correlazione di Spearman sui ranghi", "t_mannwhitney": "U di Mann-Whitney",
+        "t_kruskal": "H di Kruskal-Wallis", "t_chi2": "chi quadro di indipendenza",
+        "t_fisher": "test esatto di Fisher",
+        "e_rho": "rho", "e_rank_biserial": "rank-biserial",
+        "e_cramers_v": "V di Cramér", "e_epsilon_squared": "epsilon quadro",
+        "b_negligible": "trascurabile", "b_small": "piccolo",
+        "b_moderate": "medio", "b_large": "grande",
+        "c_exploratory": "Esplorativo. È una direzione in cui guardare, non un risultato "
+                         "da riportare.",
+        "c_multiple": "Questo questionario offre {pairs} coppie. Provandole tutte, circa "
+                      "una su venti scende sotto 0,05 senza niente dietro.",
+        "c_small_n": "Hanno risposto a entrambe solo in {n}: troppo pochi perché il p "
+                     "voglia dire molto.",
+        "c_small_group": "Almeno un gruppo ha meno di cinque persone.",
+        "c_expected_small": "{cells} celle su {of} attendono meno di cinque, e lì "
+                            "l'approssimazione del chi quadro non è affidabile.",
+        "err_too_few": "Hanno risposto a entrambe le domande meno di {minimum} persone.",
+        "err_no_variation": "Una delle due non varia mai, quindi non c'è niente da confrontare.",
+        "err_same_variable": "È due volte la stessa variabile.",
+        "err_unknown_variable": "Questa variabile non è in questo questionario.",
+        "th_median": "mediana", "th_mean": "media",
         "everyone": "tutti", "by": "per",
     },
     "de": {
@@ -119,6 +176,34 @@ STRINGS = {
         "as_public": "alle",
         "previewing": "So sieht es {who}. Was dort verborgen bleibt, bleibt auch hier verborgen.",
         "other": "Andere",
+        "explore": "Erkunden", "explore_title": "Bewegen sich diese beiden zusammen?",
+        "explore_lede": "Zwei Fragen auswählen. Den Test bestimmt die Form der Antworten, "
+                        "nicht Sie, und heraus kommt eine Richtung zum Nachschauen, "
+                        "kein Befund.",
+        "explore_x": "Erste Variable", "explore_y": "Zweite Variable",
+        "explore_run": "Vergleichen", "explore_none": "Noch nichts zu vergleichen.",
+        "lbl_test": "Test", "lbl_effect": "Effekt", "lbl_answered_both": "beantworteten beide",
+        "t_spearman": "Spearman-Rangkorrelation", "t_mannwhitney": "Mann-Whitney-U",
+        "t_kruskal": "Kruskal-Wallis-H", "t_chi2": "Chi-Quadrat-Unabhängigkeitstest",
+        "t_fisher": "exakter Test nach Fisher",
+        "e_rho": "rho", "e_rank_biserial": "rangbiserial",
+        "e_cramers_v": "Cramérs V", "e_epsilon_squared": "Epsilon-Quadrat",
+        "b_negligible": "vernachlässigbar", "b_small": "klein",
+        "b_moderate": "mittel", "b_large": "groß",
+        "c_exploratory": "Explorativ. Eine Richtung zum Nachschauen, kein Ergebnis zum "
+                         "Berichten.",
+        "c_multiple": "Dieser Fragebogen bietet {pairs} Paare. Probiert man alle, fällt "
+                      "etwa eines von zwanzig ohne Grund unter 0,05.",
+        "c_small_n": "Nur {n} Personen beantworteten beide Fragen, zu wenige für einen "
+                     "aussagekräftigen p-Wert.",
+        "c_small_group": "Mindestens eine Gruppe umfasst weniger als fünf Personen.",
+        "c_expected_small": "{cells} von {of} Zellen erwarten weniger als fünf; dort ist "
+                            "die Chi-Quadrat-Näherung unzuverlässig.",
+        "err_too_few": "Weniger als {minimum} Personen beantworteten beide Fragen.",
+        "err_no_variation": "Eine der beiden variiert nie, es gibt nichts zu vergleichen.",
+        "err_same_variable": "Das ist zweimal dieselbe Variable.",
+        "err_unknown_variable": "Diese Variable gibt es in diesem Fragebogen nicht.",
+        "th_median": "Median", "th_mean": "Mittelwert",
         "everyone": "alle", "by": "nach",
     },
     "fr": {
@@ -150,6 +235,33 @@ STRINGS = {
         "as_public": "tout le monde",
         "previewing": "Voici ce que voit {who}. Ce qui leur est masqué l'est ici aussi.",
         "other": "Autre",
+        "explore": "Explorer", "explore_title": "Ces deux-là bougent-elles ensemble ?",
+        "explore_lede": "Choisissez deux questions. Le test est choisi par la forme des "
+                        "réponses, pas par vous, et ce qui revient est une piste, "
+                        "pas un résultat.",
+        "explore_x": "Première variable", "explore_y": "Deuxième variable",
+        "explore_run": "Comparer", "explore_none": "Rien à comparer pour l'instant.",
+        "lbl_test": "test", "lbl_effect": "effet", "lbl_answered_both": "ont répondu aux deux",
+        "t_spearman": "corrélation des rangs de Spearman", "t_mannwhitney": "U de Mann-Whitney",
+        "t_kruskal": "H de Kruskal-Wallis", "t_chi2": "khi-deux d'indépendance",
+        "t_fisher": "test exact de Fisher",
+        "e_rho": "rho", "e_rank_biserial": "rang-bisérial",
+        "e_cramers_v": "V de Cramér", "e_epsilon_squared": "epsilon carré",
+        "b_negligible": "négligeable", "b_small": "petit",
+        "b_moderate": "moyen", "b_large": "grand",
+        "c_exploratory": "Exploratoire. Une piste à suivre, pas un résultat à publier.",
+        "c_multiple": "Ce questionnaire offre {pairs} paires. En les essayant toutes, "
+                      "environ une sur vingt passe sous 0,05 sans rien derrière.",
+        "c_small_n": "Seulement {n} personnes ont répondu aux deux, trop peu pour que le "
+                     "p veuille dire grand-chose.",
+        "c_small_group": "Au moins un groupe compte moins de cinq personnes.",
+        "c_expected_small": "{cells} cellules sur {of} en attendent moins de cinq, là où "
+                            "l'approximation du khi-deux n'est pas fiable.",
+        "err_too_few": "Moins de {minimum} personnes ont répondu aux deux questions.",
+        "err_no_variation": "L'une des deux ne varie jamais, il n'y a rien à comparer.",
+        "err_same_variable": "C'est deux fois la même variable.",
+        "err_unknown_variable": "Cette variable n'existe pas dans ce questionnaire.",
+        "th_median": "médiane", "th_mean": "moyenne",
         "everyone": "tout le monde", "by": "par",
     },
 }

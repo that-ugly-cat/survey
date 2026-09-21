@@ -133,7 +133,7 @@ From there:
 
 ## Checks
 
-Eleven self-contained scripts, no test framework and no running server. They build their own
+Thirteen self-contained scripts, no test framework and no running server. They build their own
 temporary database, so they never touch real data:
 
 ```bash
@@ -141,6 +141,7 @@ python test_flow.py && python test_mcp.py && python test_page_order.py
 python test_panel.py && python test_panel_migration.py && python test_purge.py
 python test_edit_guard.py && python test_review.py
 python test_aggregate.py && python test_report.py && python test_results.py
+python test_stats.py && python test_explore.py
 ```
 
 `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -162,12 +163,15 @@ model and its editor: what a stored report may contain, how far each block reach
 nothing a browser posts is trusted on the way in. `test_results.py` covers the three results
 views: labels resolved per language, what each audience is served, the masking, and that the
 page carries its numbers in the HTML so it reads with JavaScript off.
+`test_stats.py` checks the distributions against published critical points rather than
+against themselves, and `test_explore.py` checks which test gets picked for which pair of
+shapes, on fixtures whose answer is known before the code runs.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one
@@ -244,6 +248,8 @@ crypto.py         — Fernet encryption for stored TOTP secrets
 review_export.py  — questionnaire → review DOCX (translations, logic, randomization)
 report.py         — the report: ordered blocks, per-block audience, what may be stored
 results.py        — aggregates → labelled chart payloads and rendered text, per language
+stats.py          — the distribution tails the exploration needs, and nothing else
+explore.py        — two variables at a time: the test picked from their shapes
 static/           — Chart.js, vendored at one version rather than pulled from a CDN
 aggregate.py      — answers → one typed aggregate per question, and who may see it
 templates/        — landing, twofa, admin, manage, admin_users, profile, survey, …
@@ -255,6 +261,8 @@ test_review.py    — the review DOCX: every question type reaches the page, rea
 test_aggregate.py — aggregation per type, denominators under branching, disclosure per audience
 test_report.py    — the report model and its editor: what may be stored, and who may see it
 test_results.py   — the three results views: labels, disclosure, liveness, no-JS readability
+test_stats.py     — the distributions, against values from a table
+test_explore.py   — which test for which pair, and that none of it leaves the owner
 ```
 
 ## Deployment

@@ -83,8 +83,62 @@
     .empty { color: #718096; font-size: 0.9rem; padding: 2rem 0; }
     footer { font-size: 0.75rem; color: #a0aec0; margin-top: 2rem; }
     @media print {
-      header, .lang, .by, footer { display: none; }
+      header, .lang, .by, footer, .fab, .sheet { display: none; }
       .card { break-inside: avoid; border-color: #cbd5e0; }
+    }
+
+    .fab {
+      position: fixed; right: 1.5rem; bottom: 1.5rem; z-index: 40;
+      background: #2b4a73; color: #fff; border: none; border-radius: 99px;
+      padding: 0.75rem 1.3rem; font-size: 0.85rem; font-weight: 700;
+      cursor: pointer; box-shadow: 0 6px 20px rgba(26, 32, 44, 0.28);
+    }
+    .fab:hover { background: #22405f; }
+    .sheet {
+      display: none; position: fixed; inset: 0; z-index: 50;
+      background: rgba(26, 32, 44, 0.55);
+      align-items: flex-start; justify-content: center;
+      padding: 3rem 1rem; overflow-y: auto;
+    }
+    .sheet.open { display: flex; }
+    .sheet-inner {
+      background: #fff; border-radius: 12px; max-width: 640px; width: 100%;
+      padding: 1.8rem 2rem; position: relative; margin: auto;
+    }
+    .sheet-close {
+      position: absolute; top: 0.9rem; right: 1.1rem; background: none;
+      border: none; font-size: 1.1rem; color: #a0aec0; cursor: pointer;
+    }
+    .sheet h2 { font-size: 1.05rem; margin-bottom: 0.4rem; }
+    .sheet .lede { font-size: 0.82rem; color: #718096; margin-bottom: 1.2rem; }
+    .sheet label {
+      display: block; font-size: 0.7rem; text-transform: uppercase;
+      letter-spacing: 0.06em; color: #718096; margin: 0.8rem 0 0.25rem;
+    }
+    .sheet select {
+      width: 100%; padding: 0.5rem 0.6rem; border: 1px solid #cbd5e0;
+      border-radius: 6px; font-size: 0.85rem; background: #fff; color: #1a202c;
+    }
+    .sheet .go {
+      margin-top: 1.1rem; background: #2b4a73; color: #fff; border: none;
+      border-radius: 6px; padding: 0.55rem 1.2rem; font-size: 0.85rem;
+      font-weight: 600; cursor: pointer;
+    }
+    .sheet .go:disabled { opacity: 0.5; cursor: default; }
+    .verdict {
+      margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid #edf2f7;
+    }
+    .verdict .headline { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+    .verdict .sub { font-size: 0.82rem; color: #718096; margin-top: 0.2rem; }
+    .verdict table { margin-top: 0.9rem; }
+    .verdict .caveat {
+      font-size: 0.78rem; color: #8a6d3b; background: #fff8e6;
+      border: 1px solid #f0d9a8; border-radius: 6px;
+      padding: 0.5rem 0.7rem; margin-top: 0.5rem; line-height: 1.55;
+    }
+    .verdict .err {
+      font-size: 0.85rem; color: #9b2c2c; background: #fff5f5;
+      border: 1px solid #feb2b2; border-radius: 6px; padding: 0.6rem 0.8rem;
     }
   </style>
 </head>
@@ -214,6 +268,27 @@
     {% endif %}
   </main>
 
+  {% if owner and not as_who and not embed and explore_vars %}
+  <button class="fab" onclick="openSheet()">{{ t.explore }}</button>
+  <div class="sheet" id="sheet" onclick="if (event.target === this) closeSheet()">
+    <div class="sheet-inner">
+      <button class="sheet-close" onclick="closeSheet()">✕</button>
+      <h2>{{ t.explore_title }}</h2>
+      <p class="lede">{{ t.explore_lede }}</p>
+      <label for="var-x">{{ t.explore_x }}</label>
+      <select id="var-x">
+        {% for v in explore_vars %}<option value="{{ v.id }}">{{ v.label }}</option>{% endfor %}
+      </select>
+      <label for="var-y">{{ t.explore_y }}</label>
+      <select id="var-y">
+        {% for v in explore_vars %}<option value="{{ v.id }}">{{ v.label }}</option>{% endfor %}
+      </select>
+      <button class="go" id="go" onclick="runPair()">{{ t.explore_run }}</button>
+      <div class="verdict" id="verdict"></div>
+    </div>
+  </div>
+  {% endif %}
+
   <script src="/static/chart.umd.min.js"></script>
   <script>
     // The page is already readable without any of this: every chart has its
@@ -329,6 +404,86 @@
     }
 
     draw(BLOCKS);
+
+    {% if owner and not as_who and explore_vars %}
+    // --- exploration, owner only ---
+    // The server picks the test and returns keys; this turns keys into the
+    // page's own words, so a panel on an Italian page speaks Italian.
+    const SLUG = {{ slug | tojson }};
+    const EXPLORE_PAIRS = {{ explore_pairs | tojson }};
+    const T = {{ t | tojson }};
+
+    function openSheet() { document.getElementById("sheet").classList.add("open"); }
+    function closeSheet() { document.getElementById("sheet").classList.remove("open"); }
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeSheet();
+    });
+
+    function fill(text, vars) {
+      return text.replace(/\{(\w+)\}/g, function (_, k) { return vars[k]; });
+    }
+
+    function verdictTable(data) {
+      if (data.table) {
+        const head = "<tr><th></th>" + data.table.cols.map(function (c) {
+          return "<th>" + c.label + "</th>"; }).join("") + "</tr>";
+        const body = data.table.rows.map(function (r, i) {
+          return "<tr><td>" + r.label + "</td>" + data.table.counts[i].map(function (n) {
+            return "<td>" + n + "</td>"; }).join("") + "</tr>";
+        }).join("");
+        return "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>";
+      }
+      if (data.groups) {
+        const head = "<tr><th></th><th>" + T.th_n + "</th><th>" + T.th_median
+                   + "</th><th>" + T.th_mean + "</th></tr>";
+        const body = data.groups.map(function (g) {
+          return "<tr><td>" + g.label + "</td><td>" + g.n + "</td><td>" + g.median
+               + "</td><td>" + g.mean + "</td></tr>";
+        }).join("");
+        return "<table><thead>" + head + "</thead><tbody>" + body + "</tbody></table>";
+      }
+      return "";
+    }
+
+    async function runPair() {
+      const x = document.getElementById("var-x").value;
+      const y = document.getElementById("var-y").value;
+      const box = document.getElementById("verdict");
+      const btn = document.getElementById("go");
+      btn.disabled = true;
+      box.innerHTML = "";
+      try {
+        const r = await fetch("/admin/surveys/" + SLUG + "/explore.json?x="
+                              + encodeURIComponent(x) + "&y=" + encodeURIComponent(y)
+                              + "&lang=" + encodeURIComponent(LOCALE));
+        const data = await r.json();
+        if (data.error) {
+          box.innerHTML = '<p class="err">'
+            + fill(T["err_" + data.error] || data.error, data) + "</p>";
+          return;
+        }
+        const p = data.p === null ? "—"
+                : (data.p < 0.001 ? "p < 0.001" : "p = " + data.p.toFixed(3));
+        const eff = T["e_" + data.effect.name] + " " + data.effect.value
+                  + " (" + T["b_" + data.effect.band] + ")";
+        let html = '<div class="headline">' + p + "</div>"
+                 + '<div class="sub">' + T.lbl_effect + ": " + eff
+                 + " · " + T.lbl_test + ": " + T["t_" + data.test]
+                 + " · " + data.n + " " + T.lbl_answered_both + "</div>"
+                 + verdictTable(data);
+        (data.caveats || []).forEach(function (c) {
+          const vars = Object.assign({pairs: EXPLORE_PAIRS}, c);
+          html += '<p class="caveat">' + fill(T["c_" + c.kind] || c.kind, vars) + "</p>";
+        });
+        box.innerHTML = html;
+      } catch (err) {
+        box.innerHTML = '<p class="err">' + err.message + "</p>";
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    {% endif %}
 
     // Live, at the pace of a document rather than an application.
     async function refresh() {

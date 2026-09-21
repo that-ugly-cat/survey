@@ -25,6 +25,7 @@ import time
 import aggregate
 import auth
 import crypto
+import explore
 import report as report_model
 import results as results_view
 import review_export
@@ -1171,8 +1172,12 @@ def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
         "viewer": viewer,
         # Set here for every view so the template can ask without guarding: the
         # owner's route overrides them when they are looking as somebody else.
+        # Anything the page's script reads unconditionally has to be in here,
+        # or a view that never sets it renders an exception instead of a page.
         "owner": viewer == aggregate.OWNER,
         "as_who": None,
+        "explore_vars": [],
+        "explore_pairs": 0,
         "embed": embed,
         "locale": locale,
         "t": results_view.strings(locale),
@@ -1231,8 +1236,44 @@ async def results_owner(slug: str, request: Request):
                                by=by if viewer == aggregate.OWNER else None)
     context["owner"] = True
     context["as_who"] = viewer if viewer != aggregate.OWNER else None
+    # The exploration panel is the owner's alone, so its variable list is only
+    # ever put on the page when nobody else is being previewed.
+    schema = json.loads(survey["schema_json"])
+    context["explore_vars"] = (explore.variables(schema, context["locale"])
+                               if viewer == aggregate.OWNER else [])
+    context["explore_pairs"] = explore.pair_count(schema)
     db.close()
     return templates.TemplateResponse(request, "results.html", context)
+
+
+@app.get("/admin/surveys/{slug}/explore.json")
+async def explore_pair(slug: str, request: Request):
+    """Two variables against each other, for the owner and nobody else.
+
+    Not a route with an audience: a contingency table of gender against
+    anything, on the samples these studies have, is the re-identification the
+    rest of this page spends its effort preventing. There is no public form of
+    this question.
+    """
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    schema = json.loads(survey["schema_json"])
+    locale = _pick_locale(request, report_model.locales(schema))
+    responses = [json.loads(r["response_json"]) for r in db.execute(
+        "SELECT response_json FROM responses WHERE survey_id = ?", (survey["id"],))]
+    db.close()
+
+    x, y = request.query_params.get("x", ""), request.query_params.get("y", "")
+    out = explore.associate(schema, responses, x, y, locale)
+    out["pairs_available"] = explore.pair_count(schema)
+    return JSONResponse(out)
 
 
 @app.get("/admin/surveys/{slug}/results.json")

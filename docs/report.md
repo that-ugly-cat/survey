@@ -234,3 +234,36 @@ says `publish_on_open`.
 It also raises the stakes on the open `schema_version` item: forcing a schema change over
 collected answers now moves a page that strangers may be reading, and nothing in the data
 records that it happened.
+
+## 11. Exploring, which is not analysing
+
+A floating button on the owner's results page opens a panel that takes two
+variables and says whether they move together. The test is chosen from the
+shapes rather than by the person asking: two rankable variables get Spearman,
+a nominal against a rankable gets Mann-Whitney or Kruskal-Wallis by the number
+of groups, and two nominals get a contingency table — Fisher exact on a 2×2,
+chi-square otherwise. Everything is rank-based, which is the honest default on
+Likert answers and small samples.
+
+A checkbox is not one variable but one yes/no per option. Folding it into a
+single nominal would mean inventing a category for every combination somebody
+happened to tick.
+
+Three things keep it from pretending to be more than it is. Every answer
+carries an effect size beside its p, because with forty responses a p-value on
+its own invites nonsense. Every answer carries its caveats in the result rather
+than in a footnote: how many people answered both, whether a group is too
+small, whether the expected counts are too thin for chi-square, and — whenever
+p lands under 0.05 — how many pairs this questionnaire offers, since trying
+them all produces one in twenty by arithmetic alone. And it refuses: fewer than
+ten complete pairs, a variable that never varies, a variable against itself.
+
+**Owner-only, by construction.** A contingency table of gender against anything,
+on a sample this size, is the re-identification everything else on this page
+spends its effort preventing. The button is not rendered for anybody else, its
+script is not sent, and the route answers 401 or 404.
+
+No scipy: `stats.py` carries the two special functions the tails need, and
+`test_stats.py` pins them to published critical points. Writing one's own
+distributions is a way to be quietly wrong, and checking them against
+themselves would not catch it.
