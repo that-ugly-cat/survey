@@ -26,6 +26,7 @@ import aggregate
 import auth
 import crypto
 import explore
+import notice as notice_text
 import report as report_model
 import results as results_view
 import review_export
@@ -800,6 +801,10 @@ async def survey_page(request: Request, slug: str):
         "conditions": conditions,
         "page_orders": page_orders,
         "panel_token": panel_token,
+        # All four languages go down with the page: the notice follows the
+        # language switcher, which changes the form without a reload.
+        "notice": notice_text.NOTICE,
+        "footer_line": notice_text.FOOTER,
     })
 
 

@@ -11,3 +11,6 @@ data/
 
 # study-specific survey schemas stay local, not published
 *.survey.json
+
+# local dev-server config for the editor preview
+.claude/
