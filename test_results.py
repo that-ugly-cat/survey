@@ -185,6 +185,36 @@ with TestClient(main.app) as client:
     ok("zzOpenAnswerAlpha" not in r.text and "zzOpenAnswerBeta" not in r.text,
        "open answers are not in it")
 
+    # A live page put the names typed into a dynamic matrix on the public view
+    # as table rows: the open-text rule covered open questions and not open
+    # cells. Whole-page check, because that is where it showed.
+    db = main.get_db()
+    sid = db.execute("SELECT id FROM surveys WHERE slug='open'").fetchone()["id"]
+    for i in range(8):
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps({"ruolo": "a", "score": 5, "team": [
+                       {"who": "zzTypedIntoACell", "role": "pi"}]})))
+    db.commit()
+    schema2 = json.loads(json.dumps(SCHEMA))
+    schema2["pages"][0]["elements"].append(
+        {"type": "matrixdynamic", "name": "team", "cellType": "text",
+         "columns": [{"name": "who"},
+                     {"name": "role", "cellType": "dropdown", "choices": ["pi", "an"]}]})
+    # The report has to name the question, or the page leaves it out anyway and
+    # the check below passes without checking anything.
+    db.execute("UPDATE surveys SET schema_json=?, report_json=? WHERE id=?",
+               (json.dumps(schema2),
+                json.dumps({"audience": "public", "blocks": [{"kind": "all_questions"}]}),
+                sid))
+    db.commit()
+    db.close()
+    main._invalidate_results(sid)
+    leaky = client.get("/s/open/results")
+    ok("zzTypedIntoACell" not in leaky.text,
+       "text typed into a matrix cell does not reach the public page either")
+    owner_sees = client.get("/admin/surveys/open/results", cookies=owner_cookie)
+    ok("zzTypedIntoACell" in owner_sees.text, "while the owner reads it")
+
     r = client.get("/s/shut/results")
     ok(r.status_code == 404, "a report the owner kept private answers 404")
     r = client.get("/s/resp/results")

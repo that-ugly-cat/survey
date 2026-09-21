@@ -40,7 +40,8 @@ SCHEMA = {
             {"type": "matrixdropdown", "name": "cmp",
              "columns": [{"name": "know", "cellType": "radiogroup",
                           "choices": ["si", "no"]},
-                         {"name": "rate", "cellType": "rating"}],
+                         {"name": "rate", "cellType": "rating"},
+                         {"name": "nota", "cellType": "comment"}],
              "rows": ["m1", "m2"]},
             {"type": "matrixdynamic", "name": "people", "cellType": "text",
              "columns": [{"name": "pname"},
@@ -74,7 +75,8 @@ R = [
     {**arm(1), "ruolo": "a", "tools": ["x", "y"], "flag": True, "score": 5,
      "age": 30, "when": "2026-09-01", "nick": "spit", "note": "a longer remark",
      "agree": {"r1": 1, "r2": 3},
-     "cmp": {"m1": {"know": "si", "rate": 4}, "m2": {"know": "no", "rate": 2}},
+     "cmp": {"m1": {"know": "si", "rate": 4, "nota": "un commento libero"},
+             "m2": {"know": "no", "rate": 2}},
      "people": [{"pname": "a", "prole": "pi"}, {"pname": "b", "prole": "an"}],
      "rank": ["k1", "k2", "k3"], "qa": "s"},
     {**arm(2), "ruolo": "a", "tools": ["x"], "flag": False, "score": 4,
@@ -188,6 +190,44 @@ ok({c["column"]: c["n"] for c in p["columns"]} == {"pname": 3, "prole": 3},
    "a dynamic matrix pools every row the respondents added")
 ok({c["value"]: c["n"] for c in p["rows_per_respondent"]} == {1: 1, 2: 1},
    "and how many rows each of them chose to add is itself counted")
+
+print("\n--- text typed into a cell is an open answer ---")
+# Found on a live page: the free-text column of a dynamic matrix was counted as
+# if its values were choices, so what people typed became chart labels and
+# table rows on a public page, with only the counts masked.
+names_col = next(c for c in BY_NAME["people"]["columns"] if c["column"] == "pname")
+show("pname", {k: names_col.get(k) for k in ("cell_type", "open", "n", "cells", "texts")})
+ok(names_col.get("open") and names_col["cells"] is None,
+   "a text column is not tabulated into categories")
+ok(names_col["texts"] == ["a", "b", "c"], "its values are kept as open answers")
+# Above the threshold, so the strip itself is what is being tested rather than
+# the whole aggregate being withheld for being too small.
+BIG = {"name": "people", "type": "matrixdynamic", "shape": "repeating",
+       "exposed": 20, "n": 20, "missing": 0,
+       "columns": [{"column": "pname", "cell_type": "text", "open": True, "n": 20,
+                    "cells": None, "summary": None,
+                    "texts": ["Anna", "Ugo", "Nora"]},
+                   {"column": "prole", "cell_type": "dropdown", "n": 20,
+                    "cells": [{"value": "pi", "n": 12}, {"value": "an", "n": 8}]}],
+       "rows_per_respondent": [{"value": 1, "n": 20}]}
+for audience in (aggregate.RESPONDENT, aggregate.PUBLIC):
+    shown = aggregate.for_audience(BIG, audience)
+    leaked = [c for c in (shown.get("columns") or []) if c.get("texts")]
+    show(f"columns for {audience}", [(c["column"], sorted(c)) for c in shown["columns"]])
+    ok(not leaked, f"and they do not reach {audience}")
+ok(aggregate.for_audience(BIG, aggregate.OWNER)["columns"][0]["texts"],
+   "while the owner keeps them")
+
+grid_note = next(c for c in BY_NAME["cmp"]["columns"] if c["column"] == "nota")
+ok(grid_note.get("open") and grid_note["rows"][0]["cells"] is None,
+   "the same holds for a comment column of a matrix of questions")
+BIG_GRID = {**BY_NAME["cmp"], "n": 20, "exposed": 20}
+ok(not any(c.get("texts") for c in
+           (aggregate.for_audience(BIG_GRID, aggregate.PUBLIC)["columns"] or [])),
+   "and there too they stay with the owner")
+ok(any(c.get("texts") for c in
+       aggregate.for_audience(BIG_GRID, aggregate.OWNER)["columns"]),
+   "who still reads them")
 
 print("\n--- ranking ---")
 items = {i["value"]: i for i in BY_NAME["rank"]["items"]}

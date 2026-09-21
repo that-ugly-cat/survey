@@ -384,6 +384,15 @@ def _view_grid_of_questions(agg, el, block, locale, mine):
     for col in agg.get("columns") or []:
         title = _label(col["column"], _column_labels(el, locale))
         rows = col.get("rows") or []
+        if col.get("open"):
+            t = strings(locale)
+            filled = sum(r.get("n", 0) for r in rows)
+            texts = col.get("texts")
+            tables.append(_table(
+                [title, t["th_answer"]],
+                [[title, x] for x in texts] if texts
+                else [[title, t["wrote"].format(n=filled) + "."]]))
+            continue
         if col.get("cell_type") == "rating":
             data = [(r.get("summary") or {}).get("mean") for r in rows]
             payloads.append({
@@ -434,6 +443,14 @@ def _view_repeating(agg, el, block, locale, mine):
     col_titles = _column_labels(el, locale)
     for col in agg.get("columns") or []:
         title = _label(col["column"], col_titles)
+        if col.get("open"):
+            t = strings(locale)
+            texts = col.get("texts")
+            tables.append(_table(
+                [title, t["th_answer"]],
+                [[title, x] for x in texts] if texts
+                else [[title, t["wrote"].format(n=col.get("n", 0)) + "."]]))
+            continue
         if col.get("cells"):
             labels = _choice_labels(el, locale)
             p = _cells_payload(col["cells"], labels, "bar", False, col.get("n") or 0)

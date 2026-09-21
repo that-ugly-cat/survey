@@ -271,6 +271,12 @@ def _grid(el, name, values, rows):
                      for r, v in per_row.items() if r not in order]}
 
 
+# A cell the respondent types into is an open answer wherever it sits. Counting
+# those values as categories would publish them as chart labels, which is the
+# open-text rule leaking through the one door it did not cover.
+OPEN_CELLS = ("text", "comment")
+
+
 def _cell_type(el, col) -> str:
     default = el.get("cellType", "dropdown")
     return col.get("cellType", default) if isinstance(col, dict) else default
@@ -301,6 +307,16 @@ def _grid_of_questions(el, name, values, rows):
                 if isinstance(cells, dict) and _answered(cells.get(cname)):
                     per_row[row].append(cells[cname])
         numeric = kind == "rating"
+        if kind in OPEN_CELLS:
+            out.append({
+                "column": cname, "cell_type": kind, "open": True,
+                "rows": [{"value": r, "n": len(per_row.get(r, [])),
+                          "cells": None, "summary": None}
+                         for r in row_order or sorted(per_row)],
+                "texts": [str(v) for r in (row_order or sorted(per_row))
+                          for v in per_row.get(r, [])],
+            })
+            continue
         out.append({
             "column": cname, "cell_type": kind,
             "rows": [{"value": r, "n": len(per_row.get(r, [])),
@@ -323,6 +339,11 @@ def _repeating(el, name, values, rows):
         pooled = [entry.get(cname) for a in values if isinstance(a, list)
                   for entry in a if isinstance(entry, dict) and _answered(entry.get(cname))]
         numeric = kind in ("rating", "expression")
+        if kind in OPEN_CELLS:
+            out.append({"column": cname, "cell_type": kind, "open": True,
+                        "n": len(pooled), "cells": None, "summary": None,
+                        "texts": [str(v) for v in pooled]})
+            continue
         out.append({"column": cname, "cell_type": kind, "n": len(pooled),
                     "cells": None if numeric else _counts(pooled, _cell_choices(el, col)),
                     "summary": _summary(pooled) if numeric else None})
@@ -575,6 +596,9 @@ def for_audience(agg: dict, audience: str, threshold: int = THRESHOLD) -> dict:
                 cols.append(col)
                 continue
             col = dict(col)
+            # What somebody typed into a cell is an open answer and leaves with
+            # the others.
+            col.pop("texts", None)
             if isinstance(col.get("cells"), list):
                 col["cells"] = _mask_cells(col["cells"])
             if isinstance(col.get("rows"), list):
