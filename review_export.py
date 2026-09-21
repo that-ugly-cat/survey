@@ -51,6 +51,13 @@ def loc_text(v) -> str:
     return "" if v is None else str(v)
 
 
+def locales_in(obj) -> set:
+    """Public name for the locale scan, so other modules do not have to reach
+    for a private one. The report editor asks this to know which languages a
+    text block should offer."""
+    return _locales_in(obj)
+
+
 def _locales_in(obj) -> set:
     """Every locale key used anywhere inside `obj` ('default' counts as 'en')."""
     found = set()

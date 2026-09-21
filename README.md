@@ -72,10 +72,14 @@ git clone https://github.com/that-ugly-cat/survey.git
 cd survey
 pip install -r requirements.txt
 cp .env.example .env   # set SECRET_KEY, FERNET_KEY, ADMIN_EMAIL / ADMIN_PASSWORD
-uvicorn main:app --reload
+python dev-run.py      # or: uvicorn main:app --reload
 ```
 
-Open http://localhost:8000/ for the landing page, then register or sign in. The first
+`dev-run.py` reads `.env` by hand and points the database at `./data/`, which is gitignored.
+The app itself has no dotenv dependency: in production the environment comes from Docker's
+`env_file`, and this script is the only thing outside the container that reads a file.
+
+Open http://localhost:8001/ for the landing page, then register or sign in. The first
 login walks you through 2FA enrolment.
 
 ## Running a panel field
@@ -129,13 +133,14 @@ From there:
 
 ## Checks
 
-Eight self-contained scripts, no test framework and no running server. They build their own
+Eleven self-contained scripts, no test framework and no running server. They build their own
 temporary database, so they never touch real data:
 
 ```bash
 python test_flow.py && python test_mcp.py && python test_page_order.py
 python test_panel.py && python test_panel_migration.py && python test_purge.py
 python test_edit_guard.py && python test_review.py
+python test_aggregate.py && python test_report.py && python test_results.py
 ```
 
 `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -150,13 +155,19 @@ goes with them, and what must survive. `test_edit_guard.py` covers the web edit 
 to replace a questionnaire over collected answers, the confirmed path and its log line.
 `test_review.py` renders the review document and reads it back with python-docx, checking that
 every question type the platform offers reaches the page — and that one nobody taught it still
-reports itself as unrendered, so the first check means something.
+reports itself as unrendered, so the first check means something. `test_aggregate.py` covers
+what each type turns into once the answers are in, the denominators under branching and
+randomization, and what each audience is allowed to see. `test_report.py` covers the report
+model and its editor: what a stored report may contain, how far each block reaches, and that
+nothing a browser posts is trusted on the way in. `test_results.py` covers the three results
+views: labels resolved per language, what each audience is served, the masking, and that the
+page carries its numbers in the HTML so it reads with JavaScript off.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one
@@ -216,16 +227,24 @@ and its secrets are Fernet-encrypted at rest.
 
 ```
 main.py           — routes (auth, 2FA, admin, survey render/submit, uploads, exports)
+dev-run.py        — run it locally: reads .env by hand, database under ./data
 auth.py           — password hashing + signed session cookies (pending → full scope)
 totp.py           — TOTP + backup codes (RFC 6238, stdlib)
 crypto.py         — Fernet encryption for stored TOTP secrets
 review_export.py  — questionnaire → review DOCX (translations, logic, randomization)
+report.py         — the report: ordered blocks, per-block audience, what may be stored
+results.py        — aggregates → labelled chart payloads and rendered text, per language
+static/           — Chart.js, vendored at one version rather than pulled from a CDN
+aggregate.py      — answers → one typed aggregate per question, and who may see it
 templates/        — landing, twofa, admin, manage, admin_users, profile, survey, …
 static-data/      — reference JSON (cantons, countries) to upload via the file manager
 test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, assignment ledger
 test_panel_migration.py — migrating an existing database, plus template rendering
 test_purge.py     — emptying a survey of its answers: the guard, what goes, what stays
 test_review.py    — the review DOCX: every question type reaches the page, read back from it
+test_aggregate.py — aggregation per type, denominators under branching, disclosure per audience
+test_report.py    — the report model and its editor: what may be stored, and who may see it
+test_results.py   — the three results views: labels, disclosure, liveness, no-JS readability
 ```
 
 ## Deployment

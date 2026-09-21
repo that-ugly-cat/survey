@@ -20,8 +20,13 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+import time
+
+import aggregate
 import auth
 import crypto
+import report as report_model
+import results as results_view
 import review_export
 import totp
 
@@ -67,6 +72,12 @@ async def lifespan(app: FastAPI):
     os.makedirs(UPLOADS_PATH, exist_ok=True)
     init_db()
     app.mount("/uploads", StaticFiles(directory=UPLOADS_PATH), name="uploads")
+    # Chart.js, vendored at one version rather than pulled from a CDN: the
+    # results page can end up projected in a lecture hall or inside somebody
+    # else's iframe, and that is exactly where a network dependency fails.
+    # Behind the gate, /static/* has to be public for the same reason /uploads/*
+    # does — a respondent has no account here.
+    app.mount("/static", StaticFiles(directory="static"), name="static")
     # The MCP session manager has to be running for the mounted transport to
     # answer at all; without this every call to /mcp fails with a 500 that says
     # nothing about why.
@@ -256,6 +267,22 @@ def init_db():
     """)
     if fresh_assignments:
         _backfill_assignments(db)
+
+    # The results report: an ordered document of blocks, one per survey. A
+    # structure and not a copy of anything, so it lives beside the schema in
+    # the same additive style as condition_map and page_order. Null until
+    # somebody opens the editor, which reads as an empty report.
+    if "report_json" not in survey_cols:
+        db.execute("ALTER TABLE surveys ADD COLUMN report_json TEXT NULL")
+
+    # A read-only handle on one's own response, minted at submit and good for
+    # nothing but marking that person's answers on the results page. Emphatically
+    # not the panel token: that one identifies a person to a provider, and would
+    # be a reconciliation identifier travelling in a URL people paste around.
+    if "view_token" not in resp_cols:
+        db.execute("ALTER TABLE responses ADD COLUMN view_token TEXT NULL")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_responses_view_token "
+               "ON responses (survey_id, view_token)")
 
     # MCP credential, one per user and held on the user row.
     #
@@ -797,10 +824,12 @@ async def submit(slug: str, request: Request):
     if outcome not in PANEL_OUTCOMES:
         outcome = "complete"
 
+    view_token = secrets.token_urlsafe(16)
     try:
         db.execute(
-            "INSERT INTO responses (survey_id, response_json, panel_token) VALUES (?, ?, ?)",
-            (row["id"], json.dumps(data, ensure_ascii=False), token),
+            "INSERT INTO responses (survey_id, response_json, panel_token, view_token) "
+            "VALUES (?, ?, ?, ?)",
+            (row["id"], json.dumps(data, ensure_ascii=False), token, view_token),
         )
     except sqlite3.IntegrityError:
         # the unique index caught a token being spent twice
@@ -811,12 +840,19 @@ async def submit(slug: str, request: Request):
         )
     _complete_assignments(db, row["id"], data.get("_assignment_ids") or [])
     db.commit()
+    stored = report_model.normalise(row["report_json"], json.loads(row["schema_json"]))
     db.close()
+    _invalidate_results(row["id"])
+    # A results page this person may see, with their own answers marked. Only
+    # offered when the report actually reaches respondents, so the questionnaire
+    # never ends on a link to a page that answers "not found".
+    reaches = report_model.RANK[stored["audience"]] >= report_model.RANK[aggregate.RESPONDENT]
     # No token means nobody to credit, so an owner previewing the questionnaire
     # is not bounced onto the provider's completion endpoint.
     return JSONResponse({
         "ok": True,
         "redirect": _panel_redirect(panel, outcome, token) if (panel and token) else None,
+        "results_url": f"/s/{slug}/results?r={view_token}" if reaches else None,
     })
 
 
@@ -963,6 +999,7 @@ async def manage_survey(slug: str, request: Request):
     schema = json.loads(row["schema_json"])
     locales = review_export._locales_in(schema) or {"en"}
     langs = [l for l in review_export.LANGS if l in locales]
+    stored_report = report_model.normalise(row["report_json"], schema)
 
     upload_dir = os.path.join(UPLOADS_PATH, slug)
     files_count = len(os.listdir(upload_dir)) if os.path.isdir(upload_dir) else 0
@@ -984,6 +1021,8 @@ async def manage_survey(slug: str, request: Request):
         "last_response": stats["last"],
         "pool_count": pool_count,
         "files_count": files_count,
+        "report_blocks": len(stored_report["blocks"]),
+        "report_audience": stored_report["audience"],
         "langs": langs,
         "public_url": public_url,
         "qr": totp.qr_data_uri(public_url),
@@ -1042,6 +1081,306 @@ async def save_panel_config(
     db.commit()
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}?panel_saved=1", status_code=302)
+
+
+# --- results ---
+
+# Aggregates are recomputed on request and held briefly. The public page polls,
+# so without this a room full of people reloading would each re-read the whole
+# response table. Nothing here is keyed by a respondent: the view that marks
+# somebody's own answers is built fresh, because it is theirs and it is rare.
+_RESULTS_CACHE = {}
+_RESULTS_TTL = 20
+
+
+def _invalidate_results(survey_id: int) -> None:
+    for key in [k for k in _RESULTS_CACHE if k[0] == survey_id]:
+        del _RESULTS_CACHE[key]
+
+
+def _pool_rows(db, survey_id: int) -> list:
+    """Pools as plain dicts, with the JSON columns parsed. Only `pool_pages` is
+    read downstream, but the shape matches what flow and review_export expect."""
+    out = []
+    for p in db.execute(
+        "SELECT pool_name, pool_pages, show_count, condition_var, condition_map, page_order "
+        "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order", (survey_id,)
+    ).fetchall():
+        def _loads(value, fallback):
+            try:
+                return json.loads(value) if value else fallback
+            except (json.JSONDecodeError, TypeError):
+                return fallback
+        out.append({
+            "pool_name": p["pool_name"],
+            "pool_pages": _loads(p["pool_pages"], []),
+            "show_count": p["show_count"],
+            "condition_var": p["condition_var"],
+            "condition_map": _loads(p["condition_map"], {}),
+            "page_order": _loads(p["page_order"], {}),
+        })
+    return out
+
+
+def _pick_locale(request: Request, available: list) -> str:
+    asked = request.query_params.get("lang") or request.cookies.get("lang")
+    if asked in available:
+        return asked
+    header = (request.headers.get("accept-language") or "").split(",")[0].split("-")[0]
+    return header if header in available else (available[0] if available else "en")
+
+
+def _build_results(db, survey, viewer: str, locale: str, mine=None, by=None) -> dict:
+    schema = json.loads(survey["schema_json"])
+    stored = report_model.normalise(survey["report_json"], schema)
+    pools = _pool_rows(db, survey["id"])
+    responses = [json.loads(r["response_json"]) for r in db.execute(
+        "SELECT response_json FROM responses WHERE survey_id = ?", (survey["id"],))]
+    return results_view.build(schema, pools, stored, responses, viewer, locale, mine, by)
+
+
+def _results_payload(db, survey, viewer: str, locale: str, mine=None, by=None) -> dict:
+    if mine is not None:
+        return _build_results(db, survey, viewer, locale, mine, by)
+    key = (survey["id"], viewer, locale, by)
+    hit = _RESULTS_CACHE.get(key)
+    now = time.time()
+    if hit and now - hit[0] < _RESULTS_TTL:
+        return hit[1]
+    payload = _build_results(db, survey, viewer, locale, None, by)
+    _RESULTS_CACHE[key] = (now, payload)
+    return payload
+
+
+def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
+                     embed=False) -> dict:
+    schema = json.loads(survey["schema_json"])
+    stored = report_model.normalise(survey["report_json"], schema)
+    available = report_model.locales(schema)
+    locale = _pick_locale(request, available)
+    payload = _results_payload(db, survey, viewer, locale, mine, by)
+    return {
+        "title": survey["title"],
+        "slug": slug,
+        "viewer": viewer,
+        # Set here for every view so the template can ask without guarding: the
+        # owner's route overrides them when they are looking as somebody else.
+        "owner": viewer == aggregate.OWNER,
+        "as_who": None,
+        "embed": embed,
+        "locale": locale,
+        "t": results_view.strings(locale),
+        "locales": available,
+        "audience": stored["audience"],
+        "blocks": payload["blocks"],
+        "responses": payload["responses"],
+        "by": by,
+        "condition_vars": [p["condition_var"] for p in _pool_rows(db, survey["id"])
+                           if p["condition_var"]],
+        "updated_at": time.strftime("%H:%M"),
+        "poll_url": (f"/admin/surveys/{slug}/results.json" if viewer == aggregate.OWNER
+                     else f"/s/{slug}/results.json"),
+    }
+
+
+def _public_viewer(db, survey, request):
+    """(viewer, own answers) for a request to the public results page, or None
+    when this report does not reach that far."""
+    stored = report_model.normalise(
+        survey["report_json"], json.loads(survey["schema_json"]))
+    token = (request.query_params.get("r") or "").strip()
+    row = None
+    if token:
+        row = db.execute(
+            "SELECT response_json FROM responses WHERE survey_id = ? AND view_token = ?",
+            (survey["id"], token)).fetchone()
+    if row is not None:
+        if report_model.RANK[stored["audience"]] < report_model.RANK[aggregate.RESPONDENT]:
+            return None, None
+        return aggregate.RESPONDENT, aggregate.answers(json.loads(row["response_json"]))
+    if stored["audience"] != aggregate.PUBLIC:
+        return None, None
+    return aggregate.PUBLIC, None
+
+
+@app.get("/admin/surveys/{slug}/results", response_class=HTMLResponse)
+async def results_owner(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    by = request.query_params.get("by") or None
+    # Looking at one's own page as somebody else sees it. Nothing is faked: the
+    # page is built for that audience, through the same filter it would get.
+    # It is the only way to check what the public view actually exposes without
+    # publishing it first and opening it in another browser.
+    as_who = request.query_params.get("as")
+    viewer = as_who if as_who in (aggregate.RESPONDENT, aggregate.PUBLIC) else aggregate.OWNER
+    context = _results_context(request, db, survey, slug, viewer,
+                               by=by if viewer == aggregate.OWNER else None)
+    context["owner"] = True
+    context["as_who"] = viewer if viewer != aggregate.OWNER else None
+    db.close()
+    return templates.TemplateResponse(request, "results.html", context)
+
+
+@app.get("/admin/surveys/{slug}/results.json")
+async def results_owner_json(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    schema = json.loads(survey["schema_json"])
+    locale = _pick_locale(request, report_model.locales(schema))
+    as_who = request.query_params.get("as")
+    viewer = as_who if as_who in (aggregate.RESPONDENT, aggregate.PUBLIC) else aggregate.OWNER
+    payload = _results_payload(db, survey, viewer, locale,
+                               by=request.query_params.get("by") or None
+                               if viewer == aggregate.OWNER else None)
+    db.close()
+    return JSONResponse({**payload, "updated_at": time.strftime("%H:%M")})
+
+
+async def _public_results(slug: str, request: Request, embed: bool):
+    db = get_db()
+    survey = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not survey:
+        db.close()
+        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
+    viewer, mine = _public_viewer(db, survey, request)
+    if viewer is None:
+        # A report nobody published and a survey that does not exist answer the
+        # same way: there is nothing here to find, and no hint that there might be.
+        db.close()
+        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
+    context = _results_context(request, db, survey, slug, viewer, mine=mine, embed=embed)
+    db.close()
+    return templates.TemplateResponse(request, "results.html", context)
+
+
+@app.get("/s/{slug}/results", response_class=HTMLResponse)
+async def results_public(slug: str, request: Request):
+    return await _public_results(slug, request, embed=False)
+
+
+@app.get("/s/{slug}/results/embed", response_class=HTMLResponse)
+async def results_embed(slug: str, request: Request):
+    return await _public_results(slug, request, embed=True)
+
+
+@app.get("/s/{slug}/results.json")
+async def results_public_json(slug: str, request: Request):
+    db = get_db()
+    survey = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    viewer, mine = _public_viewer(db, survey, request)
+    if viewer is None:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    schema = json.loads(survey["schema_json"])
+    locale = _pick_locale(request, report_model.locales(schema))
+    payload = _results_payload(db, survey, viewer, locale, mine=mine)
+    db.close()
+    return JSONResponse({**payload, "updated_at": time.strftime("%H:%M")})
+
+
+def _report_context(db, survey, slug: str, saved: bool = False) -> dict:
+    """Everything report.html needs: the stored report, and the questionnaire
+    described well enough that the editor can offer the right charts for each
+    question without asking the server again."""
+    schema = json.loads(survey["schema_json"])
+    stored = report_model.normalise(survey["report_json"], schema)
+    questions = []
+    for page in schema.get("pages", []):
+        for el in page.get("elements", []):
+            if el.get("type") == "html":
+                continue
+            shape = aggregate.shape_of(el)
+            questions.append({
+                "name": el.get("name"),
+                "title": review_export.loc_text(el.get("title")) or el.get("name"),
+                "type": el.get("type"),
+                "page": page.get("name"),
+                "shape": shape,
+                "charts": report_model.CHARTS.get(shape, ["table"]),
+            })
+    return {
+        "title": survey["title"],
+        "slug": slug,
+        "active": bool(survey["active"]),
+        "responses": _response_count(db, survey["id"]),
+        "report": stored,
+        "questions": questions,
+        "locales": report_model.locales(schema),
+        "findings": report_model.validate(stored, schema),
+        "saved": saved,
+    }
+
+
+@app.get("/admin/surveys/{slug}/report", response_class=HTMLResponse)
+async def report_page(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    context = _report_context(db, survey, slug,
+                              saved=request.query_params.get("saved") == "1")
+    db.close()
+    return templates.TemplateResponse(request, "report.html", context)
+
+
+@app.post("/admin/surveys/{slug}/report")
+async def save_report(slug: str, request: Request):
+    """Store the report. The editor is JavaScript, so the payload is whatever
+    the browser sent: it goes through normalise() before it is written, because
+    what is written here is later served to people with no account."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not signed in"}, status_code=401)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        db.close()
+        return JSONResponse({"error": "body is not JSON"}, status_code=400)
+
+    schema = json.loads(survey["schema_json"])
+    clean = report_model.normalise(payload, schema)
+    if clean["audience"] != aggregate.OWNER and survey["active"]:
+        # Not a refusal: whoever runs the study decides. But it is written down,
+        # because results visible while the field is open change what later
+        # respondents answer, and nobody should discover that afterwards.
+        log.info("report published (%s) on open survey %s by user %s",
+                 clean["audience"], slug, user["id"])
+    db.execute("UPDATE surveys SET report_json = ? WHERE id = ?",
+               (json.dumps(clean, ensure_ascii=False), survey["id"]))
+    db.commit()
+    db.close()
+    _invalidate_results(survey["id"])
+    return JSONResponse({"ok": True, "report": clean,
+                         "findings": report_model.validate(clean, schema)})
 
 
 @app.get("/admin/surveys/{slug}/edit", response_class=HTMLResponse)
@@ -1125,7 +1464,9 @@ async def edit_survey(
         (title, schema_str, slug),
     )
     db.commit()
+    survey_id = row["id"]
     db.close()
+    _invalidate_results(survey_id)
     if held:
         log.warning(
             "schema of survey %r replaced over %d collected response(s) "
@@ -1174,6 +1515,7 @@ async def purge_responses(slug: str, request: Request):
         db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool["id"],))
         db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool["id"],))
     db.commit()
+    _invalidate_results(row["id"])
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}", status_code=302)
 
@@ -1185,9 +1527,11 @@ async def delete_survey(slug: str, request: Request):
     if not user:
         db.close()
         return RedirectResponse("/login", status_code=302)
-    if _owned_survey(db, slug, user):
+    owned = _owned_survey(db, slug, user)
+    if owned:
         db.execute("DELETE FROM surveys WHERE slug = ?", (slug,))
         db.commit()
+        _invalidate_results(owned["id"])
         shutil.rmtree(os.path.join(UPLOADS_PATH, slug), ignore_errors=True)
     db.close()
     return RedirectResponse("/admin", status_code=302)

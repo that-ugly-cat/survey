@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: {% if embed %}transparent{% else %}#f4f6f9{% endif %};
+      color: #1a202c;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header .sub { font-size: 0.78rem; color: #718096; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+
+    main { max-width: 860px; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+    h1 { font-size: 1.55rem; line-height: 1.3; margin-bottom: 0.3rem; }
+    .meta { font-size: 0.8rem; color: #718096; margin-bottom: 2rem; }
+    .meta .dot { margin: 0 0.45rem; color: #cbd5e0; }
+
+    .topbar { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+    .topbar .spacer { flex: 1; }
+    .lang a, .by a {
+      font-size: 0.72rem; font-weight: 600; color: #718096; text-decoration: none;
+      border: 1px solid #cbd5e0; border-radius: 99px; padding: 0.15rem 0.6rem;
+      background: #fff;
+    }
+    .lang a.on, .by a.on { background: #4a6fa5; border-color: #4a6fa5; color: #fff; }
+
+    .prose { margin: 0 0 1.75rem; }
+    .prose h1 { font-size: 1.3rem; margin: 1.6rem 0 0.5rem; }
+    .prose h2 { font-size: 1.1rem; margin: 1.5rem 0 0.45rem; }
+    .prose h3 { font-size: 0.98rem; margin: 1.3rem 0 0.4rem; }
+    .prose p, .prose ul, .prose ol { margin-bottom: 0.8rem; font-size: 0.95rem; }
+    .prose ul, .prose ol { padding-left: 1.4rem; }
+    .prose code { background: #edf2f7; padding: 0.1rem 0.3rem; border-radius: 3px;
+                  font-size: 0.85em; }
+
+    .card {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 10px;
+      padding: 1.4rem 1.6rem; margin-bottom: 1.1rem;
+    }
+    .card h2 { font-size: 1rem; line-height: 1.45; margin-bottom: 0.25rem; }
+    .qdesc { font-size: 0.82rem; color: #718096; margin-bottom: 0.7rem; }
+    .base {
+      font-size: 0.74rem; color: #718096; margin-bottom: 0.9rem;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .note { font-size: 0.82rem; color: #4a5568; margin-top: 0.6rem; }
+    .thin { color: #a0aec0; font-style: italic; }
+    .chart-wrap { position: relative; height: 260px; margin: 0.4rem 0 0.2rem; }
+    .chart-wrap.tall { height: 340px; }
+    .chart-title { font-size: 0.82rem; font-weight: 600; margin-top: 0.9rem; }
+
+    details { margin-top: 0.7rem; }
+    summary {
+      font-size: 0.75rem; color: #718096; cursor: pointer; list-style: none;
+      display: inline-block; border-bottom: 1px dotted #cbd5e0;
+    }
+    summary::-webkit-details-marker { display: none; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.6rem; }
+    th, td {
+      text-align: left; font-size: 0.8rem; padding: 0.35rem 0.6rem;
+      border-bottom: 1px solid #edf2f7; vertical-align: top;
+    }
+    th { color: #718096; font-weight: 600; font-size: 0.72rem;
+         text-transform: uppercase; letter-spacing: 0.04em; }
+    td:nth-child(n+2) { font-variant-numeric: tabular-nums; }
+
+    .mine {
+      display: inline-block; font-size: 0.7rem; font-weight: 700; color: #2f6b42;
+      background: #e6f5ec; border-radius: 99px; padding: 0.05rem 0.5rem;
+      margin-left: 0.4rem;
+    }
+    .empty { color: #718096; font-size: 0.9rem; padding: 2rem 0; }
+    footer { font-size: 0.75rem; color: #a0aec0; margin-top: 2rem; }
+    @media print {
+      header, .lang, .by, footer { display: none; }
+      .card { break-inside: avoid; border-color: #cbd5e0; }
+    }
+  </style>
+</head>
+<body>
+{% if owner and not embed %}
+  <header>
+    <div class="brand">Survey Admin</div>
+    <span class="sub">{{ title }}</span>
+    <a href="/admin/surveys/{{ slug }}/report">Edit report</a>
+    <a href="/admin/surveys/{{ slug }}">← Back to survey</a>
+    <a href="/admin">All surveys</a>
+  </header>
+{% endif %}
+
+  <main>
+    {% if not embed %}
+    <div class="topbar">
+      <h1>{{ title }}</h1>
+      <span class="spacer"></span>
+      {% if locales | length > 1 %}
+      <span class="lang">
+        {% for l in locales %}
+        <a href="?lang={{ l }}{% if by %}&by={{ by }}{% endif %}"
+           class="{{ 'on' if l == locale else '' }}">{{ l | upper }}</a>
+        {% endfor %}
+      </span>
+      {% endif %}
+    </div>
+    <p class="meta">
+      {{ responses }} {{ t.response if responses == 1 else t.responses }}
+      <span class="dot">·</span>
+      {{ t.updated }} <span id="stamp">{{ updated_at }}</span>
+      {% if viewer == "respondent" %}
+        <span class="dot">·</span> {{ t.own_marked }}
+      {% endif %}
+      {% if owner %}
+        <span class="dot">·</span>
+        {% if audience == 'public' %}{{ t.aud_public }}
+        {% elif audience == 'respondent' %}{{ t.aud_respondent }}
+        {% else %}{{ t.aud_owner }}{% endif %}
+      {% endif %}
+    </p>
+
+    {% if owner %}
+    <p class="by" style="margin-bottom:1.2rem">
+      <span style="font-size:0.72rem;color:#a0aec0">{{ t.as_label }}</span>
+      <a href="?lang={{ locale }}" class="{{ 'on' if not as_who else '' }}">{{ t.as_me }}</a>
+      <a href="?lang={{ locale }}&as=respondent"
+         class="{{ 'on' if as_who == 'respondent' else '' }}">{{ t.as_resp }}</a>
+      <a href="?lang={{ locale }}&as=public"
+         class="{{ 'on' if as_who == 'public' else '' }}">{{ t.as_public }}</a>
+    </p>
+    {% if as_who %}
+    <p class="note" style="background:#fff7e6;border:1px solid #f0d9a8;border-radius:8px;
+       padding:0.7rem 0.9rem;margin-bottom:1.2rem">
+      {{ t.previewing.format(who=(t.as_resp if as_who == 'respondent' else t.as_public)) }}
+    </p>
+    {% endif %}
+    {% endif %}
+
+    {% if owner and not as_who and condition_vars %}
+    <p class="by" style="margin-bottom:1.5rem">
+      <a href="?lang={{ locale }}" class="{{ 'on' if not by else '' }}">{{ t.everyone }}</a>
+      {% for v in condition_vars %}
+      <a href="?lang={{ locale }}&by={{ v }}" class="{{ 'on' if by == v else '' }}">{{ t.by }} {{ v }}</a>
+      {% endfor %}
+    </p>
+    {% endif %}
+    {% endif %}
+
+    <div id="report">
+    {% for b in blocks %}
+      {% if b.kind == "text" %}
+        <div class="prose">{{ b.html | safe }}</div>
+      {% elif b.kind == "orphan" %}
+        <div class="card"><p class="note thin">{{ b.note }}</p></div>
+      {% else %}
+        <section class="card" data-name="{{ b.name }}">
+          <h2>{{ b.title }}</h2>
+          {% if b.description %}<p class="qdesc">{{ b.description }}</p>{% endif %}
+          <p class="base">
+            {{ b.n }} {{ t.answered }}{% if b.missing %} · {{ b.missing }} {{ t.skipped }}{% endif %}{% if b.exposed != b.n %} · {{ b.exposed }} {{ t.asked }}{% endif %}
+          </p>
+          {% if b.below_threshold %}
+            <p class="note thin">{{ b.note }}</p>
+          {% else %}
+            {% for c in b.charts %}
+              {% if c.title %}<div class="chart-title">{{ c.title }}</div>{% endif %}
+              <div class="chart-wrap {{ 'tall' if c.stacked else '' }}">
+                <canvas data-chart="{{ loop.index0 }}" data-block="{{ b.name }}"></canvas>
+              </div>
+            {% endfor %}
+            {% if b.note %}<p class="note">{{ b.note }}</p>{% endif %}
+            {% for tbl in b.tables %}
+              <details {{ 'open' if not b.charts else '' }}>
+                <summary>{{ t.numbers }}</summary>
+                <table>
+                  <thead><tr>{% for col in tbl.columns %}<th>{{ col }}</th>{% endfor %}</tr></thead>
+                  <tbody>
+                  {% for row in tbl.rows %}
+                    <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+                  {% endfor %}
+                  </tbody>
+                </table>
+              </details>
+            {% endfor %}
+            {% if b.groups %}
+              {% for g in b.groups %}
+                <div class="chart-title">{{ b.by }} = {{ g.value }} ({{ g.n }})</div>
+                {% for c in g.charts %}
+                <div class="chart-wrap {{ 'tall' if c.stacked else '' }}">
+                  <canvas data-group="{{ b.name }}:{{ g.value }}:{{ loop.index0 }}"></canvas>
+                </div>
+                {% endfor %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+        </section>
+      {% endif %}
+    {% else %}
+      <p class="empty">{{ t.nothing }}</p>
+    {% endfor %}
+    </div>
+
+    {% if not embed %}
+    <footer>{{ t.footer }}</footer>
+    {% endif %}
+  </main>
+
+  <script src="/static/chart.umd.min.js"></script>
+  <script>
+    // The page is already readable without any of this: every chart has its
+    // numbers under it, rendered by the server. Chart.js draws on top.
+    const BLOCKS   = {{ blocks | tojson }};
+    const POLL_URL = {{ poll_url | tojson }};
+    const LOCALE   = {{ locale | tojson }};
+    const BY       = {{ by | tojson }};
+    const AS_WHO   = {{ as_who | tojson }};
+    const HIDDEN   = {{ t.hidden | tojson }};
+
+    const INK   = "#4a6fa5";
+    const MINE  = "#2f8f5b";
+    const SCALE = ["#4a6fa5", "#6b8cbd", "#9db4d4", "#c9b8a8", "#c98a5e", "#b5643a"];
+    const GRID  = "#edf2f7";
+
+    function palette(n) {
+      if (n <= 1) return [INK];
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        out.push(SCALE[Math.round(i * (SCALE.length - 1) / (n - 1))]);
+      }
+      return out;
+    }
+
+    // The payload speaks in shapes, not in Chart.js: one place to change if the
+    // library ever does.
+    function config(p) {
+      const horizontal = p.chart === "bar" || p.chart === "stacked";
+      const type = (p.chart === "pie" || p.chart === "segmented") ? "pie"
+                 : (p.chart === "line") ? "line" : "bar";
+      const multi = p.series.length > 1;
+      const datasets = p.series.map(function (s, i) {
+        const colors = multi ? palette(p.series.length)[i]
+                             : p.labels.map(function (_, j) {
+                                 return (p.mine && p.mine.indexOf(j) !== -1) ? MINE : INK;
+                               });
+        return {
+          label: s.label || "",
+          data: s.data,
+          backgroundColor: (type === "pie" && !multi) ? palette(p.labels.length) : colors,
+          borderColor: type === "line" ? INK : undefined,
+          borderWidth: type === "line" ? 2 : 0,
+          fill: false,
+          tension: 0.25,
+        };
+      });
+      const stacked = !!p.stacked;
+      return {
+        type: type,
+        data: { labels: p.labels, datasets: datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          indexAxis: (type === "bar" && horizontal) ? "y" : "x",
+          plugins: {
+            legend: { display: multi || type === "pie",
+                      position: multi ? "bottom" : "right",
+                      labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: {
+              callbacks: {
+                label: function (ctx) {
+                  const v = ctx.parsed[ctx.chart.options.indexAxis === "y" ? "x" : "y"];
+                  const val = (v === undefined || v === null) ? ctx.parsed : v;
+                  if (val === null) return HIDDEN;
+                  return (ctx.dataset.label ? ctx.dataset.label + ": " : "")
+                         + val + (p.percent ? "%" : "");
+                },
+              },
+            },
+          },
+          scales: type === "pie" ? {} : {
+            x: { stacked: stacked, grid: { color: GRID },
+                 ticks: { font: { size: 11 }, precision: p.percent ? 1 : 0 },
+                 max: (p.percent && stacked && horizontal) ? 100 : undefined },
+            y: { stacked: stacked, grid: { color: GRID },
+                 beginAtZero: true,
+                 // Counts are whole people; a y axis offering 1.4 of one is noise.
+                 ticks: { font: { size: 11 }, precision: p.percent ? 1 : 0 },
+                 max: (p.percent && stacked && !horizontal) ? 100 : undefined },
+          },
+        },
+      };
+    }
+
+    const live = {};
+
+    function draw(blocks) {
+      blocks.forEach(function (b) {
+        if (b.kind !== "question" || !b.charts) return;
+        b.charts.forEach(function (p, i) {
+          const canvas = document.querySelector(
+            'canvas[data-block="' + b.name + '"][data-chart="' + i + '"]');
+          if (!canvas) return;
+          const key = b.name + ":" + i;
+          if (live[key]) {
+            live[key].data = config(p).data;
+            live[key].update();
+          } else {
+            live[key] = new Chart(canvas, config(p));
+          }
+        });
+        (b.groups || []).forEach(function (g) {
+          (g.charts || []).forEach(function (p, i) {
+            const canvas = document.querySelector(
+              'canvas[data-group="' + b.name + ":" + g.value + ":" + i + '"]');
+            if (!canvas) return;
+            const key = "g:" + b.name + ":" + g.value + ":" + i;
+            if (live[key]) { live[key].data = config(p).data; live[key].update(); }
+            else { live[key] = new Chart(canvas, config(p)); }
+          });
+        });
+      });
+    }
+
+    draw(BLOCKS);
+
+    // Live, at the pace of a document rather than an application.
+    async function refresh() {
+      try {
+        const url = POLL_URL + "?lang=" + encodeURIComponent(LOCALE)
+                  + (BY ? "&by=" + encodeURIComponent(BY) : "")
+                  + (AS_WHO ? "&as=" + encodeURIComponent(AS_WHO) : "");
+        const r = await fetch(url, { headers: { "Accept": "application/json" } });
+        if (!r.ok) return;
+        const data = await r.json();
+        draw(data.blocks);
+        const stamp = document.getElementById("stamp");
+        if (stamp && data.updated_at) stamp.textContent = data.updated_at;
+      } catch (e) { /* a refresh that fails leaves the last good page up */ }
+    }
+    setInterval(refresh, 30000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Results report — {{ title }}</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0f1117; color: #e2e8f0; min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    header {
+      height: 52px; background: #1a1d27; border-bottom: 1px solid #2d3148;
+      display: flex; align-items: center; padding: 0 2rem; gap: 1rem;
+    }
+    header .brand { font-size: 0.9rem; font-weight: 700; color: #fff; flex: 1; }
+    header .sub   { font-size: 0.78rem; color: #718096; }
+    header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
+    header a:hover { color: #a0aec0; }
+    main { max-width: 860px; margin: 2rem auto; padding: 0 1.5rem 6rem; }
+
+    h1 { font-size: 1.3rem; margin-bottom: 0.4rem; }
+    .lede { font-size: 0.85rem; color: #718096; line-height: 1.65; margin-bottom: 1.5rem; }
+
+    .bar {
+      display: flex; align-items: center; gap: 0.8rem; flex-wrap: wrap;
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 1rem 1.25rem; margin-bottom: 1rem;
+    }
+    .bar label { font-size: 0.78rem; color: #718096; }
+    .bar .spacer { flex: 1; }
+
+    select, textarea, input[type=text] {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      color: #e2e8f0; font-size: 0.82rem; padding: 0.4rem 0.6rem; outline: none;
+      font-family: inherit;
+    }
+    select:focus, textarea:focus, input:focus { border-color: #4a6fa5; }
+    textarea { width: 100%; min-height: 5.5rem; line-height: 1.6; resize: vertical; }
+
+    .btn {
+      display: inline-block; padding: 0.45rem 0.9rem; border-radius: 6px;
+      border: 1px solid #2d3148; background: #1a1d27; color: #a0aec0;
+      font-size: 0.8rem; font-weight: 600; cursor: pointer; text-decoration: none;
+    }
+    .btn:hover { border-color: #4a6fa5; color: #e2e8f0; }
+    .btn-blue { background: #4a6fa5; border-color: #4a6fa5; color: #fff; }
+    .btn-blue:hover { background: #3d5c8a; color: #fff; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+
+    .note {
+      padding: 0.7rem 0.9rem; border-radius: 6px; font-size: 0.78rem;
+      line-height: 1.6; margin-bottom: 1rem;
+    }
+    .note-warn { background: #2b2410; border: 1px solid #7a6320; color: #e6c260; }
+    .note-err  { background: #2d1515; border: 1px solid #7b2020; color: #fc8181; }
+    .note-ok   { background: #14251a; border: 1px solid #2f6b42; color: #68d391; }
+
+    .block {
+      background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
+      padding: 0.9rem 1.1rem; margin-bottom: 0.7rem;
+    }
+    .block.dragging { opacity: 0.4; }
+    .block.over { border-color: #4a6fa5; }
+    .block-head {
+      display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+      margin-bottom: 0.6rem;
+    }
+    .handle { cursor: grab; color: #4a5568; font-size: 1rem; padding: 0 0.2rem; }
+    .handle:active { cursor: grabbing; }
+    .kind {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #718096; border: 1px solid #2d3148; border-radius: 99px;
+      padding: 0.15rem 0.55rem;
+    }
+    .block-title { font-size: 0.86rem; font-weight: 600; flex: 1; min-width: 8rem; }
+    .qname {
+      font-family: monospace; font-size: 0.76rem; color: #718096;
+      white-space: nowrap; flex: none; margin-right: 0.3rem;
+    }
+    .block-head select { flex: none; }
+    .arrow {
+      background: none; border: none; color: #4a5568; cursor: pointer;
+      font-size: 0.85rem; padding: 0.1rem 0.3rem;
+    }
+    .arrow:hover { color: #e2e8f0; }
+    .arrow:disabled { opacity: 0.25; cursor: default; }
+    .del { color: #7b4a4a; }
+    .del:hover { color: #fc8181; }
+
+    .opts { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .opts label { font-size: 0.7rem; color: #4a5568; }
+    .loc { margin-top: 0.6rem; }
+    .loc-label {
+      font-size: 0.68rem; color: #718096; text-transform: uppercase;
+      letter-spacing: 0.06em; margin-bottom: 0.25rem;
+    }
+    .orphan { border-color: #7b2020; }
+    .orphan .block-title { color: #fc8181; }
+
+    .adders { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1.2rem; }
+    .empty {
+      text-align: center; padding: 2.5rem 1rem; color: #4a5568;
+      font-size: 0.85rem; line-height: 1.7;
+      border: 1px dashed #2d3148; border-radius: 10px;
+    }
+    .savebar {
+      position: sticky; bottom: 0; background: #0f1117; padding: 1rem 0 0;
+      display: flex; align-items: center; gap: 0.8rem;
+      border-top: 1px solid #2d3148; margin-top: 1.5rem;
+    }
+    .savebar .msg { font-size: 0.78rem; color: #718096; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Survey Admin</div>
+    <span class="sub">{{ title }}</span>
+    <a href="/admin/surveys/{{ slug }}">← Back to survey</a>
+    <a href="/admin">All surveys</a>
+    <a href="/logout">Sign out</a>
+  </header>
+
+  <main>
+    <h1>Results report</h1>
+    <p class="lede">
+      An ordered document of blocks: text you write, and charts of the answers. Start empty and
+      add what you want, or drop in <em>all questions</em> for the whole questionnaire in one
+      block — that one keeps up by itself when the questionnaire grows. Each block says how far
+      it may travel; the report's own setting is the ceiling for all of them.
+    </p>
+
+    <div class="bar">
+      <label for="audience">This report is</label>
+      <select id="audience">
+        <option value="owner">private to me</option>
+        <option value="respondent">shown to respondents after they submit</option>
+        <option value="public">visible to anyone with the link</option>
+      </select>
+      <span class="spacer"></span>
+      <span class="sub" style="font-size:0.75rem;color:#4a5568">{{ responses }} response{{ '' if responses == 1 else 's' }} collected</span>
+    </div>
+
+    <div id="anchor-warn" class="note note-warn" style="display:none">
+      This survey is <strong>open</strong>. Results visible while a survey is still collecting
+      change what later respondents answer: whoever sees the distribution before answering is
+      anchored by it. Publishing anyway is a legitimate choice, and it is recorded in the
+      application log so that it stays a choice rather than an accident.
+    </div>
+
+    <div id="findings"></div>
+    <div id="blocks"></div>
+
+    <div class="adders">
+      <button class="btn" onclick="addText()">+ Text</button>
+      <select id="add-question">
+        <option value="">+ Question…</option>
+        {% for q in questions %}
+        <option value="{{ q.name }}">{{ q.title }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn" onclick="addAll()">+ All questions</button>
+    </div>
+
+    <div class="savebar">
+      <button class="btn btn-blue" id="save" onclick="save()">Save report</button>
+      <span class="msg" id="msg"></span>
+    </div>
+  </main>
+
+  <script>
+    const SLUG      = {{ slug | tojson }};
+    const QUESTIONS = {{ questions | tojson }};
+    const LOCALES   = {{ locales | tojson }};
+    const ACTIVE    = {{ active | tojson }};
+    const BY_NAME   = Object.fromEntries(QUESTIONS.map(q => [q.name, q]));
+
+    let report = {{ report | tojson }};
+    let dirty  = false;
+    let dragFrom = null;
+
+    const AUDIENCE_LABEL = {
+      owner: "only me", respondent: "respondents too", public: "anyone",
+    };
+    const VALUE_LABEL = { count: "counts", percent: "percentages" };
+    const SORT_LABEL  = { schema: "schema order", frequency: "most frequent first" };
+    const OTHER_LABEL = { show: "show “other”", hide: "hide “other”" };
+
+    function el(tag, cls, text) {
+      const n = document.createElement(tag);
+      if (cls) n.className = cls;
+      if (text !== undefined) n.textContent = text;
+      return n;
+    }
+
+    function select(options, current, onChange, labels) {
+      const s = el("select");
+      options.forEach(function (o) {
+        const opt = el("option", null, labels ? (labels[o] || o) : o);
+        opt.value = o;
+        if (o === current) opt.selected = true;
+        s.appendChild(opt);
+      });
+      s.onchange = function () { onChange(s.value); touch(); };
+      return s;
+    }
+
+    function touch() {
+      dirty = true;
+      document.getElementById("msg").textContent = "unsaved changes";
+    }
+
+    function move(from, to) {
+      if (to < 0 || to >= report.blocks.length) return;
+      const b = report.blocks.splice(from, 1)[0];
+      report.blocks.splice(to, 0, b);
+      touch(); render();
+    }
+
+    function remove(i) { report.blocks.splice(i, 1); touch(); render(); }
+
+    function addText() {
+      report.blocks.push({ kind: "text", md: {} });
+      touch(); render();
+    }
+
+    function addAll() {
+      report.blocks.push({ kind: "all_questions" });
+      touch(); render();
+    }
+
+    // Exploding happens here rather than on the server: the browser already
+    // holds the question list in schema order, and a round trip to reshuffle
+    // an array the page is holding would be a round trip for nothing.
+    function explode(i) {
+      const audience = report.blocks[i].audience;
+      const made = QUESTIONS.map(function (q) {
+        const b = { kind: "question", name: q.name, chart: q.charts[0],
+                    value: "count", sort: "schema", other: "show" };
+        if (audience) b.audience = audience;
+        return b;
+      });
+      report.blocks.splice.apply(report.blocks, [i, 1].concat(made));
+      touch(); render();
+    }
+
+    function blockCard(b, i) {
+      const q = b.kind === "question" ? BY_NAME[b.name] : null;
+      const orphan = b.kind === "question" && !q;
+      const card = el("div", "block" + (orphan ? " orphan" : ""));
+      card.draggable = true;
+
+      card.ondragstart = function (e) {
+        dragFrom = i; card.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        // Firefox will not start a drag without something on the transfer.
+        e.dataTransfer.setData("text/plain", String(i));
+      };
+      card.ondragend   = function () { card.classList.remove("dragging"); };
+      card.ondragover  = function (e) { e.preventDefault(); card.classList.add("over"); };
+      card.ondragleave = function () { card.classList.remove("over"); };
+      card.ondrop      = function (e) {
+        e.preventDefault(); card.classList.remove("over");
+        if (dragFrom !== null && dragFrom !== i) move(dragFrom, i);
+        dragFrom = null;
+      };
+
+      const head = el("div", "block-head");
+      head.appendChild(el("span", "handle", "☰"));
+      head.appendChild(el("span", "kind",
+        b.kind === "all_questions" ? "all questions" : b.kind));
+
+      if (b.kind === "question") {
+        const t = el("span", "block-title", orphan ? b.name + " — not in the questionnaire"
+                                                   : q.title);
+        head.appendChild(t);
+        if (!orphan) head.appendChild(el("span", "qname", q.type));
+      } else if (b.kind === "all_questions") {
+        head.appendChild(el("span", "block-title",
+          QUESTIONS.length + " questions, in schema order"));
+      } else {
+        head.appendChild(el("span", "block-title", "Text"));
+      }
+
+      const aud = select(["owner", "respondent", "public"],
+                         b.audience || report.audience,
+                         function (v) { b.audience = v; render(); }, AUDIENCE_LABEL);
+      aud.title = "How far this block may travel";
+      head.appendChild(aud);
+
+      const up = el("button", "arrow", "↑");
+      up.title = "Move up"; up.disabled = i === 0;
+      up.onclick = function () { move(i, i - 1); };
+      const down = el("button", "arrow", "↓");
+      down.title = "Move down"; down.disabled = i === report.blocks.length - 1;
+      down.onclick = function () { move(i, i + 1); };
+      const del = el("button", "arrow del", "✕");
+      del.title = "Remove this block";
+      del.onclick = function () { remove(i); };
+      head.appendChild(up); head.appendChild(down); head.appendChild(del);
+      card.appendChild(head);
+
+      if (b.kind === "text") {
+        if (!b.md) b.md = {};
+        LOCALES.forEach(function (loc) {
+          const key = loc === "en" && b.md.default !== undefined ? "default" : loc;
+          const wrap = el("div", "loc");
+          wrap.appendChild(el("div", "loc-label", loc.toUpperCase() +
+            (key === "default" ? " (default)" : "")));
+          const ta = el("textarea");
+          ta.value = b.md[key] || "";
+          ta.placeholder = "Markdown. Headings, lists, emphasis and links.";
+          ta.oninput = function () { b.md[key] = ta.value; touch(); };
+          wrap.appendChild(ta);
+          card.appendChild(wrap);
+        });
+      } else if (b.kind === "question" && !orphan) {
+        const opts = el("div", "opts");
+        opts.appendChild(select(q.charts, b.chart || q.charts[0],
+                                function (v) { b.chart = v; }));
+        opts.appendChild(select(["count", "percent"], b.value || "count",
+                                function (v) { b.value = v; }, VALUE_LABEL));
+        opts.appendChild(select(["schema", "frequency"], b.sort || "schema",
+                                function (v) { b.sort = v; }, SORT_LABEL));
+        opts.appendChild(select(["show", "hide"], b.other || "show",
+                                function (v) { b.other = v; }, OTHER_LABEL));
+        card.appendChild(opts);
+        if (q.shape === "open") {
+          const n = el("div", "note note-warn");
+          n.style.marginTop = "0.6rem"; n.style.marginBottom = "0";
+          n.textContent = "Open answers themselves never leave your own view, "
+            + "whatever this block is set to. Published, it shows how many people "
+            + "wrote something and how long it was.";
+          card.appendChild(n);
+        }
+      } else if (b.kind === "all_questions") {
+        const opts = el("div", "opts");
+        const x = el("button", "btn", "Explode into separate blocks");
+        x.onclick = function () { explode(i); };
+        opts.appendChild(x);
+        const hint = el("span", "loc-label");
+        hint.style.marginBottom = "0";
+        hint.textContent = "keeps up with the questionnaire until you do";
+        opts.appendChild(hint);
+        card.appendChild(opts);
+      }
+      return card;
+    }
+
+    function renderFindings(findings) {
+      const box = document.getElementById("findings");
+      box.innerHTML = "";
+      (findings || []).forEach(function (f) {
+        const n = el("div", "note " + (f.severity === "error" ? "note-err" : "note-warn"));
+        n.textContent = f.message;
+        box.appendChild(n);
+      });
+    }
+
+    function render() {
+      document.getElementById("audience").value = report.audience;
+      document.getElementById("anchor-warn").style.display =
+        (ACTIVE && report.audience !== "owner") ? "block" : "none";
+      const list = document.getElementById("blocks");
+      list.innerHTML = "";
+      if (!report.blocks.length) {
+        list.appendChild(el("div", "empty",
+          "Nothing in this report yet. Add a block below — “All questions” is the one-click "
+          + "version and can be exploded later."));
+        return;
+      }
+      report.blocks.forEach(function (b, i) { list.appendChild(blockCard(b, i)); });
+    }
+
+    document.getElementById("audience").onchange = function (e) {
+      report.audience = e.target.value; touch(); render();
+    };
+
+    document.getElementById("add-question").onchange = function (e) {
+      const name = e.target.value;
+      if (!name) return;
+      const q = BY_NAME[name];
+      report.blocks.push({ kind: "question", name: name, chart: q.charts[0],
+                           value: "count", sort: "schema", other: "show" });
+      e.target.value = "";
+      touch(); render();
+    };
+
+    async function save() {
+      const btn = document.getElementById("save");
+      const msg = document.getElementById("msg");
+      btn.disabled = true; msg.textContent = "saving…";
+      try {
+        const r = await fetch("/admin/surveys/" + SLUG + "/report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(report),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || "save failed");
+        // The server normalises what it stores, so the editor adopts what came
+        // back rather than what it sent: otherwise the page shows a report the
+        // database does not have.
+        report = data.report;
+        renderFindings(data.findings);
+        render();
+        dirty = false;
+        msg.textContent = "saved";
+      } catch (err) {
+        msg.textContent = "not saved: " + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    window.addEventListener("beforeunload", function (e) {
+      if (dirty) { e.preventDefault(); e.returnValue = ""; }
+    });
+
+    renderFindings({{ findings | tojson }});
+    render();
+    {% if saved %}document.getElementById("msg").textContent = "saved";{% endif %}
+  </script>
+</body>
+</html>

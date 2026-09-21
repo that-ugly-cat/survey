@@ -61,6 +61,15 @@
     var page_orders     = {{ page_orders | tojson }};
     var panel_token     = {{ panel_token | tojson }};
     var LANGS           = ["en", "de", "fr", "it"];
+    // The completion page is rendered by SurveyJS from the schema, so this one
+    // line of ours has to carry its own translations.
+    var RESULTS_LINK_TEXT = {
+      "":   "See what everyone answered →",
+      en:   "See what everyone answered →",
+      de:   "Ansehen, was alle geantwortet haben →",
+      fr:   "Voir ce que tout le monde a répondu →",
+      it:   "Guarda cosa hanno risposto gli altri →",
+    };
 
     // Scan schema recursively for locale keys inside localized string objects.
     // A localized string object has all-string values and at least one key that
@@ -224,6 +233,26 @@
             // credited. Give the completion state a moment to paint first.
             if (body && body.redirect) {
               setTimeout(function() { window.location.replace(body.redirect); }, 1200);
+              return;
+            }
+            // A results page this person may see, with their own answers marked.
+            // The link is only ever sent when the report reaches respondents, so
+            // there is nothing here to hide and nothing to check.
+            if (r.ok && body && body.results_url) {
+              setTimeout(function() {
+                var host = document.querySelector('.sd-completedpage')
+                        || document.getElementById('survey-container');
+                if (!host || host.querySelector('.results-link')) return;
+                var p = document.createElement('p');
+                p.className = 'results-link';
+                p.style.cssText = 'margin-top:1.2rem;text-align:center;font-size:0.95rem';
+                var a = document.createElement('a');
+                a.href = body.results_url;
+                a.textContent = RESULTS_LINK_TEXT[survey.locale] || RESULTS_LINK_TEXT.en;
+                a.style.cssText = 'color:#4a6fa5;font-weight:600';
+                p.appendChild(a);
+                host.appendChild(p);
+              }, 300);
             }
           });
         })

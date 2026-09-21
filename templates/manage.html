@@ -369,6 +369,18 @@
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/files">Files</a>
         <span class="config-desc">{{ files_count }} file{{ '' if files_count == 1 else 's' }} uploaded</span>
       </div>
+      <div class="config-item">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/report">Results report</a>
+        <a class="btn" href="/admin/surveys/{{ slug }}/results">View results</a>
+        <span class="config-desc">
+          {% if report_blocks %}
+            {{ report_blocks }} block{{ '' if report_blocks == 1 else 's' }},
+            {% if report_audience == 'public' %}visible to anyone with the link
+            {% elif report_audience == 'respondent' %}shown to respondents after they submit
+            {% else %}private to you{% endif %}
+          {% else %}nothing published yet{% endif %}
+        </span>
+      </div>
     </section>
 
     <section>
