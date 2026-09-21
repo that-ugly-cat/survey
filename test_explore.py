@@ -143,6 +143,7 @@ with TestClient(main.app) as client:
                ("demo", "Demo", json.dumps(SCHEMA), owner_id,
                 json.dumps({"audience": "public", "blocks": [{"kind": "all_questions"}]})))
     sid = db.execute("SELECT id FROM surveys WHERE slug='demo'").fetchone()["id"]
+    R_ROWS = list(R)
     for r in R:
         db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
                    (sid, json.dumps(r)))
@@ -178,6 +179,100 @@ with TestClient(main.app) as client:
     preview = client.get("/admin/surveys/demo/results?as=public", cookies=owner_cookie)
     ok("explore.json" not in preview.text,
        "and it is gone from the owner's preview too, which is what the preview is for")
+
+    print("\n--- letting readers in, one survey at a time ---")
+    import report as R
+    db = main.get_db()
+    rep = {"audience": "public", "blocks": [{"kind": "all_questions"}]}
+    db.execute("UPDATE surveys SET report_json=? WHERE slug='demo'", (json.dumps(rep),))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+
+    pub_url = "/s/demo/explore.json?x=gruppo&y=eco"
+    ok(client.get(pub_url).status_code == 404,
+       "with the switch off, the reader's route is not there at all")
+    page = client.get("/s/demo/results")
+    ok('class="fab"' not in page.text, "and the public page carries no button")
+
+    rep["explore"] = True
+    db = main.get_db()
+    db.execute("UPDATE surveys SET report_json=? WHERE slug='demo'", (json.dumps(rep),))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+
+    r = client.get(pub_url)
+    body = r.json()
+    show("public answer", {k: body.get(k) for k in ("test", "p", "n")})
+    ok(r.status_code == 200 and body["test"] == "fisher",
+       "with it on, a reader gets the same test")
+    ok(body["effect"]["value"] == 1.0, "and the same effect size, computed on everything")
+    ok(client.get("/s/demo/results").text.count('class="fab"') == 1,
+       "and the page carries the button")
+
+    print("\n--- but not the people behind the cells ---")
+    owner_view = client.get("/admin/surveys/demo/explore.json?x=gruppo&y=eco",
+                            cookies=owner_cookie).json()
+    show("owner cells", owner_view["table"]["counts"])
+    show("public cells", body["table"]["counts"])
+    ok(owner_view["table"]["counts"] == [[15, 0], [0, 15]],
+       "the owner sees the table as it is")
+    ok(body["table"]["counts"] == [[15, 0], [0, 15]],
+       "and so does a reader when every cell is large enough")
+
+    thin = [{"gruppo": "a", "eco": "a"}] * 18 + [{"gruppo": "b", "eco": "b"}] * 3
+    db = main.get_db()
+    db.execute("DELETE FROM responses WHERE survey_id=?", (sid,))
+    for t in thin:
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps(t)))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+    masked = client.get(pub_url).json()
+    show("thin, public", masked["table"]["counts"])
+    ok(any(c is None for row in masked["table"]["counts"] for c in row),
+       "a cell of three people is hidden from a reader")
+    ok(sum(1 for row in masked["table"]["counts"] for c in row if c is None) >= 2,
+       "with a second one, so the margins cannot give it back")
+    ok(masked["p"] is not None and masked["effect"]["value"] is not None,
+       "while the test and the effect still come back: they are aggregates")
+    ok(any(c["kind"] == "cells_hidden" for c in masked["caveats"]),
+       "and the page says the cells were hidden")
+    owner_thin = client.get("/admin/surveys/demo/explore.json?x=gruppo&y=eco",
+                            cookies=owner_cookie).json()
+    ok(all(c is not None for row in owner_thin["table"]["counts"] for c in row),
+       "the owner still sees them")
+
+    print("\n--- and not everything, and not too early ---")
+    few = [{"gruppo": "a", "eco": "a"}] * 8 + [{"gruppo": "b", "eco": "b"}] * 7
+    db = main.get_db()
+    db.execute("DELETE FROM responses WHERE survey_id=?", (sid,))
+    for t in few:
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps(t)))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+    ok(client.get(pub_url).json().get("error") == "too_few",
+       "fifteen is enough for the owner and not for a reader: the floor is twenty")
+    ok(not client.get("/admin/surveys/demo/explore.json?x=gruppo&y=eco",
+                      cookies=owner_cookie).json().get("error"),
+       "and the owner is not held to it")
+
+    db = main.get_db()
+    db.execute("DELETE FROM responses WHERE survey_id=?", (sid,))
+    for row in R_ROWS:
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps(row)))
+    half = {"audience": "public", "explore": True, "blocks": [
+        {"kind": "question", "name": "gruppo"},
+        {"kind": "question", "name": "eco", "audience": "owner"}]}
+    db.execute("UPDATE surveys SET report_json=? WHERE slug='demo'", (json.dumps(half),))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+    ok(client.get(pub_url).json().get("error") == "not_published",
+       "a question the report keeps back cannot be put on an axis either")
+    picker = client.get("/s/demo/results").text
+    ok('value="gruppo"' in picker and 'value="eco"' not in picker,
+       "and it is not in the reader's picker to begin with")
 
 print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: " + "; ".join(FAILED)))
 sys.exit(1 if FAILED else 0)

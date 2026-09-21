@@ -83,6 +83,17 @@ STRINGS = {
         "err_same_variable": "That is the same variable twice.",
         "err_unknown_variable": "No such variable in this questionnaire.",
         "th_median": "median", "th_mean": "mean",
+        "c_cells_hidden": "Cells holding fewer than five people are hidden, as they "
+                          "are everywhere else on this page. The test above them is "
+                          "computed on all of it.",
+        "c_groups_hidden": "Groups of fewer than five people are left out of the table.",
+        "err_not_published": "That question is not published on this page.",
+        "explore_public": "Let readers cross two questions themselves",
+        "explore_public_hint": "For citizen science: anyone reading the page can pick "
+                               "two published questions and see whether they move "
+                               "together. They get the test and the effect size; cells "
+                               "under five people stay hidden, and twenty people must "
+                               "have answered both before anything is shown.",
         "everyone": "everyone", "by": "by",
     },
     "it": {
@@ -145,6 +156,17 @@ STRINGS = {
         "err_same_variable": "È due volte la stessa variabile.",
         "err_unknown_variable": "Questa variabile non è in questo questionario.",
         "th_median": "mediana", "th_mean": "media",
+        "c_cells_hidden": "Le celle con meno di cinque persone sono nascoste, come "
+                          "ovunque su questa pagina. Il test qui sopra è calcolato "
+                          "su tutto.",
+        "c_groups_hidden": "I gruppi con meno di cinque persone restano fuori dalla tabella.",
+        "err_not_published": "Quella domanda non è pubblicata su questa pagina.",
+        "explore_public": "Lascia incrociare due domande a chi legge",
+        "explore_public_hint": "Per la citizen science: chi legge la pagina può scegliere "
+                               "due domande pubblicate e vedere se si muovono insieme. "
+                               "Ottiene il test e l'ampiezza dell'effetto; le celle sotto "
+                               "le cinque persone restano nascoste, e servono venti "
+                               "persone che abbiano risposto a entrambe.",
         "everyone": "tutti", "by": "per",
     },
     "de": {
@@ -204,6 +226,17 @@ STRINGS = {
         "err_same_variable": "Das ist zweimal dieselbe Variable.",
         "err_unknown_variable": "Diese Variable gibt es in diesem Fragebogen nicht.",
         "th_median": "Median", "th_mean": "Mittelwert",
+        "c_cells_hidden": "Zellen mit weniger als fünf Personen bleiben ausgeblendet, "
+                          "wie überall auf dieser Seite. Der Test darüber rechnet mit "
+                          "allem.",
+        "c_groups_hidden": "Gruppen unter fünf Personen bleiben aus der Tabelle heraus.",
+        "err_not_published": "Diese Frage ist auf dieser Seite nicht veröffentlicht.",
+        "explore_public": "Leser zwei Fragen selbst kreuzen lassen",
+        "explore_public_hint": "Für Citizen Science: wer die Seite liest, kann zwei "
+                               "veröffentlichte Fragen wählen und sehen, ob sie "
+                               "zusammenhängen. Test und Effektstärke ja, Zellen unter "
+                               "fünf Personen nein, und erst wenn zwanzig Personen beide "
+                               "beantwortet haben.",
         "everyone": "alle", "by": "nach",
     },
     "fr": {
@@ -262,6 +295,17 @@ STRINGS = {
         "err_same_variable": "C'est deux fois la même variable.",
         "err_unknown_variable": "Cette variable n'existe pas dans ce questionnaire.",
         "th_median": "médiane", "th_mean": "moyenne",
+        "c_cells_hidden": "Les cellules de moins de cinq personnes sont masquées, "
+                          "comme partout ailleurs sur cette page. Le test au-dessus "
+                          "porte sur la totalité.",
+        "c_groups_hidden": "Les groupes de moins de cinq personnes restent hors du tableau.",
+        "err_not_published": "Cette question n'est pas publiée sur cette page.",
+        "explore_public": "Laisser les lecteurs croiser deux questions",
+        "explore_public_hint": "Pour la science participative : qui lit la page peut "
+                               "choisir deux questions publiées et voir si elles varient "
+                               "ensemble. Le test et la taille d'effet oui, les cellules "
+                               "de moins de cinq personnes non, et vingt personnes "
+                               "doivent avoir répondu aux deux.",
         "everyone": "tout le monde", "by": "par",
     },
 }

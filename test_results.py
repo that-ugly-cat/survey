@@ -197,6 +197,12 @@ with TestClient(main.app) as client:
        "with a label on the table: the first version shadowed the string table "
        "with the loop variable and rendered an empty summary")
 
+    ok(r.text.count('class="lang"') == 1 and 'href="?lang=de"' in r.text,
+       "the switcher offers every language the page speaks, not only the "
+       "questionnaire's: a reader with no Italian still gets the frame")
+    de = client.get("/s/open/results?lang=de")
+    ok("die Zahlen" in de.text, "and switching to one of them works")
+
     it = client.get("/s/open/results?lang=it")
     ok("i numeri" in it.text and "hanno risposto" in it.text,
        "the page's own words follow the language, not only the questionnaire's")

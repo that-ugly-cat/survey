@@ -1129,12 +1129,14 @@ def _pool_rows(db, survey_id: int) -> list:
     return out
 
 
-def _pick_locale(request: Request, available: list) -> str:
+def _pick_locale(request: Request, available: list, default: str = None) -> str:
     asked = request.query_params.get("lang") or request.cookies.get("lang")
     if asked in available:
         return asked
     header = (request.headers.get("accept-language") or "").split(",")[0].split("-")[0]
-    return header if header in available else (available[0] if available else "en")
+    if header in available:
+        return header
+    return default or (available[0] if available else "en")
 
 
 def _build_results(db, survey, viewer: str, locale: str, mine=None, by=None) -> dict:
@@ -1159,12 +1161,35 @@ def _results_payload(db, survey, viewer: str, locale: str, mine=None, by=None) -
     return payload
 
 
+def _explore_vars(schema: dict, stored: dict, viewer: str, locale: str) -> list:
+    """The variables this viewer may put on an axis.
+
+    The owner reaches everything. A reader reaches nothing unless the report
+    says so, and then only the questions the report already shows them:
+    crossing two questions is a way of reading them, and a question kept back
+    is kept back on both axes too.
+    """
+    if viewer == aggregate.OWNER:
+        return explore.variables(schema, locale)
+    if not stored.get("explore"):
+        return []
+    allowed = report_model.published_names(stored, schema, viewer)
+    return [v for v in explore.variables(schema, locale) if v["question"] in allowed]
+
+
 def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
                      embed=False) -> dict:
     schema = json.loads(survey["schema_json"])
     stored = report_model.normalise(survey["report_json"], schema)
-    available = report_model.locales(schema)
-    locale = _pick_locale(request, available)
+    # Two layers, and the switcher belongs to the outer one. The page's own
+    # words exist in all four languages whatever the questionnaire was written
+    # in, so a reader who has no Italian at least gets the frame in their own;
+    # the question labels follow the schema and fall back to what it has. A
+    # page with no switcher at all was the wrong answer for anything a stranger
+    # might open.
+    content = report_model.locales(schema)
+    available = list(review_export.LANGS)
+    locale = _pick_locale(request, available, default=content[0])
     payload = _results_payload(db, survey, viewer, locale, mine, by)
     return {
         "title": survey["title"],
@@ -1176,8 +1201,11 @@ def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
         # or a view that never sets it renders an exception instead of a page.
         "owner": viewer == aggregate.OWNER,
         "as_who": None,
-        "explore_vars": [],
-        "explore_pairs": 0,
+        "explore_vars": _explore_vars(schema, stored, viewer, locale),
+        "explore_pairs": explore.pair_count(schema),
+        "explore_url": (f"/admin/surveys/{slug}/explore.json"
+                        if viewer == aggregate.OWNER
+                        else f"/s/{slug}/explore.json"),
         "embed": embed,
         "locale": locale,
         "t": results_view.strings(locale),
@@ -1236,12 +1264,6 @@ async def results_owner(slug: str, request: Request):
                                by=by if viewer == aggregate.OWNER else None)
     context["owner"] = True
     context["as_who"] = viewer if viewer != aggregate.OWNER else None
-    # The exploration panel is the owner's alone, so its variable list is only
-    # ever put on the page when nobody else is being previewed.
-    schema = json.loads(survey["schema_json"])
-    context["explore_vars"] = (explore.variables(schema, context["locale"])
-                               if viewer == aggregate.OWNER else [])
-    context["explore_pairs"] = explore.pair_count(schema)
     db.close()
     return templates.TemplateResponse(request, "results.html", context)
 
@@ -1265,7 +1287,8 @@ async def explore_pair(slug: str, request: Request):
         db.close()
         return JSONResponse({"error": "not found"}, status_code=404)
     schema = json.loads(survey["schema_json"])
-    locale = _pick_locale(request, report_model.locales(schema))
+    content = report_model.locales(schema)
+    locale = _pick_locale(request, list(review_export.LANGS), default=content[0])
     responses = [json.loads(r["response_json"]) for r in db.execute(
         "SELECT response_json FROM responses WHERE survey_id = ?", (survey["id"],))]
     db.close()
@@ -1273,6 +1296,39 @@ async def explore_pair(slug: str, request: Request):
     x, y = request.query_params.get("x", ""), request.query_params.get("y", "")
     out = explore.associate(schema, responses, x, y, locale)
     out["pairs_available"] = explore.pair_count(schema)
+    return JSONResponse(out)
+
+
+@app.get("/s/{slug}/explore.json")
+async def explore_pair_public(slug: str, request: Request):
+    """The same question, asked by a reader.
+
+    Only when the report says readers may, only over the questions it already
+    publishes, and with the cells of whatever comes back masked. The statistic
+    is an aggregate and travels; the people behind the cells do not.
+    """
+    db = get_db()
+    survey = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    viewer, _ = _public_viewer(db, survey, request)
+    schema = json.loads(survey["schema_json"])
+    stored = report_model.normalise(survey["report_json"], schema)
+    if viewer is None or not stored.get("explore"):
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    content = report_model.locales(schema)
+    locale = _pick_locale(request, list(review_export.LANGS), default=content[0])
+    responses = [json.loads(r["response_json"]) for r in db.execute(
+        "SELECT response_json FROM responses WHERE survey_id = ?", (survey["id"],))]
+    db.close()
+    out = explore.associate(
+        schema, responses,
+        request.query_params.get("x", ""), request.query_params.get("y", ""),
+        locale, audience=viewer,
+        allowed=report_model.published_names(stored, schema, viewer))
+    out["pairs_available"] = len(_explore_vars(schema, stored, viewer, locale))
     return JSONResponse(out)
 
 
@@ -1288,7 +1344,8 @@ async def results_owner_json(slug: str, request: Request):
         db.close()
         return JSONResponse({"error": "not found"}, status_code=404)
     schema = json.loads(survey["schema_json"])
-    locale = _pick_locale(request, report_model.locales(schema))
+    content = report_model.locales(schema)
+    locale = _pick_locale(request, list(review_export.LANGS), default=content[0])
     as_who = request.query_params.get("as")
     viewer = as_who if as_who in (aggregate.RESPONDENT, aggregate.PUBLIC) else aggregate.OWNER
     payload = _results_payload(db, survey, viewer, locale,
@@ -1337,7 +1394,8 @@ async def results_public_json(slug: str, request: Request):
         db.close()
         return JSONResponse({"error": "not found"}, status_code=404)
     schema = json.loads(survey["schema_json"])
-    locale = _pick_locale(request, report_model.locales(schema))
+    content = report_model.locales(schema)
+    locale = _pick_locale(request, list(review_export.LANGS), default=content[0])
     payload = _results_payload(db, survey, viewer, locale, mine=mine)
     db.close()
     return JSONResponse({**payload, "updated_at": time.strftime("%H:%M")})
@@ -1375,6 +1433,10 @@ def _report_context(db, survey, slug: str, saved: bool = False) -> dict:
         "questions": questions,
         "locales": report_model.locales(schema),
         "findings": report_model.validate(stored, schema),
+        # The editor is English like the rest of the admin, but this one switch
+        # describes what readers of a localized page will get, so it borrows
+        # their words.
+        "t": results_view.strings(report_model.locales(schema)[0]),
         "saved": saved,
     }
 
@@ -1418,6 +1480,9 @@ async def save_report(slug: str, request: Request):
 
     schema = json.loads(survey["schema_json"])
     clean = report_model.normalise(payload, schema)
+    if clean["explore"] and clean["audience"] != aggregate.OWNER:
+        log.info("reader exploration enabled on survey %s by user %s",
+                 slug, user["id"])
     if clean["audience"] != aggregate.OWNER and survey["active"]:
         # Not a refusal: whoever runs the study decides. But it is written down,
         # because results visible while the field is open change what later

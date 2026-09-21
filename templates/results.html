@@ -268,7 +268,7 @@
     {% endif %}
   </main>
 
-  {% if owner and not as_who and not embed and explore_vars %}
+  {% if explore_vars and not embed %}
   <button class="fab" onclick="openSheet()">{{ t.explore }}</button>
   <div class="sheet" id="sheet" onclick="if (event.target === this) closeSheet()">
     <div class="sheet-inner">
@@ -405,11 +405,12 @@
 
     draw(BLOCKS);
 
-    {% if owner and not as_who and explore_vars %}
-    // --- exploration, owner only ---
+    {% if explore_vars and not embed %}
+    // --- exploration ---
     // The server picks the test and returns keys; this turns keys into the
     // page's own words, so a panel on an Italian page speaks Italian.
     const SLUG = {{ slug | tojson }};
+    const EXPLORE_URL = {{ explore_url | tojson }};
     const EXPLORE_PAIRS = {{ explore_pairs | tojson }};
     const T = {{ t | tojson }};
 
@@ -453,8 +454,8 @@
       btn.disabled = true;
       box.innerHTML = "";
       try {
-        const r = await fetch("/admin/surveys/" + SLUG + "/explore.json?x="
-                              + encodeURIComponent(x) + "&y=" + encodeURIComponent(y)
+        const r = await fetch(EXPLORE_URL + "?x=" + encodeURIComponent(x)
+                              + "&y=" + encodeURIComponent(y)
                               + "&lang=" + encodeURIComponent(LOCALE));
         const data = await r.json();
         if (data.error) {

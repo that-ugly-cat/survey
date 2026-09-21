@@ -11,9 +11,15 @@ cheap is a tool that manufactures p-values below 0.05 at exactly the rate the
 arithmetic predicts. That warning is returned with every result that has
 company.
 
-Owner-only by construction: a contingency table of gender against anything, on
-a sample this size, is the re-identification the whole masking scheme exists to
-prevent. Nothing here is reachable from the public page.
+Readers can be let in, one survey at a time, because a citizen-science page is
+worth more when the people who contributed can turn the data over themselves.
+What they get is the association and not the people behind it: the statistic
+and the effect size are computed on everything, while the cells of any table
+come back masked under the same rule the charts use, the floor rises to twenty
+complete pairs, and they may only cross questions the report already publishes.
+Off unless the owner turns it on, and never on by default: the reason to open
+this door for a bird count is not a reason to open it for a study about
+abuse.
 
 Pure module: no FastAPI, no database.
 """
@@ -149,10 +155,45 @@ def _levels(values: list, labels: dict) -> list:
     return [v for v in seen if v in values] + extra
 
 
+def _mask_matrix(counts: list, threshold: int = aggregate.THRESHOLD) -> list:
+    """Hide the small cells of a contingency table, and enough of the rest.
+
+    The same rule the charts use, for the same reason: one hidden cell in a
+    table whose margins are visible is a subtraction away from being read. The
+    statistic above the table is computed on everything — it is an aggregate,
+    not a cell — and it is the number a reader is here for.
+    """
+    flat = [(i, j, counts[i][j]) for i in range(len(counts))
+            for j in range(len(counts[i]))]
+    hidden = {(i, j) for i, j, n in flat if 0 < n < threshold}
+    if hidden:
+        order = sorted((c for c in flat if c[2]), key=lambda c: c[2])
+        total = sum(n for i, j, n in flat if (i, j) in hidden)
+        for i, j, n in order:
+            if total >= threshold and len(hidden) > 1:
+                break
+            if (i, j) not in hidden:
+                hidden.add((i, j))
+                total += n
+    return [[None if (i, j) in hidden else counts[i][j]
+             for j in range(len(counts[i]))] for i in range(len(counts))]
+
+
 def associate(schema: dict, responses: list, x_id: str, y_id: str,
-              locale: str = "en", minimum: int = 10) -> dict:
-    """Whether two variables move together, with the test chosen from shapes."""
+              locale: str = "en", minimum: int = 10,
+              audience: str = aggregate.OWNER, allowed: set = None) -> dict:
+    """Whether two variables move together, with the test chosen from shapes.
+
+    `audience` other than the owner masks the cells of whatever table comes
+    back and raises the floor: a reader gets the association and not the people
+    behind it. `allowed` bounds which variables they may reach at all.
+    """
+    if audience != aggregate.OWNER:
+        minimum = max(minimum, 20)
     x, y = _find(schema, x_id), _find(schema, y_id)
+    if allowed is not None and x and y and not (
+            x["question"] in allowed and y["question"] in allowed):
+        return {"error": "not_published"}
     if not x or not y:
         return {"error": "unknown_variable",
                 "detail": x_id if not x else y_id}
@@ -223,6 +264,12 @@ def associate(schema: dict, responses: list, x_id: str, y_id: str,
                    "groups": groups, "group_of": group_var["id"]}
         if any(g["n"] < 5 for g in groups):
             out["caveats"].append({"kind": "small_group"})
+        if audience != aggregate.OWNER:
+            # A group of three is three people described by their median.
+            kept = [g for g in out["groups"] if g["n"] >= aggregate.THRESHOLD]
+            if len(kept) < len(out["groups"]):
+                out["groups"] = kept
+                out["caveats"].append({"kind": "groups_hidden"})
         return _with_caveats(out)
 
     # Both nominal: a contingency table.
@@ -241,6 +288,11 @@ def associate(schema: dict, responses: list, x_id: str, y_id: str,
     # Fisher where it is exact and chi-square where it is not trustworthy: on a
     # 2x2 the exact answer costs nothing, and small expected counts are exactly
     # the case the approximation was never meant for.
+    if audience != aggregate.OWNER:
+        masked = _mask_matrix(table)
+        out["table"]["counts"] = masked
+        if any(c is None for row in masked for c in row):
+            out["caveats"].append({"kind": "cells_hidden"})
     if len(rows) == 2 and len(cols) == 2:
         p = stats.fisher_exact_2x2(table[0][0], table[0][1], table[1][0], table[1][1])
         out.update({"test": "fisher", "p": p, "statistic": {}})

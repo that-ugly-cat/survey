@@ -258,10 +258,20 @@ p lands under 0.05 — how many pairs this questionnaire offers, since trying
 them all produces one in twenty by arithmetic alone. And it refuses: fewer than
 ten complete pairs, a variable that never varies, a variable against itself.
 
-**Owner-only, by construction.** A contingency table of gender against anything,
-on a sample this size, is the re-identification everything else on this page
-spends its effort preventing. The button is not rendered for anybody else, its
-script is not sent, and the route answers 401 or 404.
+**Readers can be let in, one survey at a time.** A citizen-science page is worth
+more when the people who contributed can turn the data over themselves, so the
+report carries a switch for it, off unless the owner turns it on. What a reader
+gets is the association and not the people behind it: the statistic and the
+effect size are computed on everything, while the cells of any table come back
+masked under the same rule the charts use, the floor rises from ten complete
+pairs to twenty, groups under five are left out, and they may only cross
+questions the report already publishes — crossing two questions is a way of
+reading them, so a question kept back is kept back on both axes.
+
+With the switch off the route is not there at all, the button is not rendered
+and its script is not sent. The reason to open this door for a bird count is
+not a reason to open it for a study about abuse, which is why it is a decision
+and not a default.
 
 No scipy: `stats.py` carries the two special functions the tails need, and
 `test_stats.py` pins them to published critical points. Writing one's own

@@ -68,6 +68,18 @@ ok(q["chart"] == "bar" and q["value"] == "count" and q["sort"] == "schema"
    and q["other"] == "show",
    "options outside the allowed set fall back to the default for that shape")
 
+print("\n--- letting readers explore is a switch, and it is off ---")
+ok(R.normalise({"blocks": []}, SCHEMA)["explore"] is False,
+   "a report nobody configured does not invite readers to cross questions")
+on = R.normalise({"audience": "public", "explore": True, "blocks": [
+    {"kind": "question", "name": "ruolo"},
+    {"kind": "question", "name": "note", "audience": "owner"}]}, SCHEMA)
+ok(on["explore"] is True, "and the switch survives the trip through normalise")
+show("published to the public", sorted(R.published_names(on, SCHEMA, "public")))
+ok(R.published_names(on, SCHEMA, "public") == {"ruolo"},
+   "what a reader may cross is what the report already shows them")
+ok("note" in R.published_names(on, SCHEMA, "owner"), "the owner reaches both")
+
 plain = R.normalise({"blocks": [{"kind": "text", "md": "just a string"}]}, SCHEMA)
 ok(plain["blocks"][0]["md"] == {"default": "just a string"},
    "a report written before anyone thought about translation reads as the default locale")

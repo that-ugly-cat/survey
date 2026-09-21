@@ -161,6 +161,16 @@
       <span class="sub" style="font-size:0.75rem;color:#4a5568">{{ responses }} response{{ '' if responses == 1 else 's' }} collected</span>
     </div>
 
+    <div class="bar" id="explore-bar" style="display:none">
+      <label style="display:flex;gap:0.5rem;align-items:flex-start;cursor:pointer">
+        <input type="checkbox" id="explore-toggle" style="margin-top:0.25rem">
+        <span>
+          <span style="color:#e2e8f0;font-size:0.82rem">{{ t.explore_public }}</span><br>
+          <span style="font-size:0.75rem;color:#4a5568;line-height:1.6">{{ t.explore_public_hint }}</span>
+        </span>
+      </label>
+    </div>
+
     <div id="anchor-warn" class="note note-warn" style="display:none">
       This survey is <strong>open</strong>. Results visible while a survey is still collecting
       change what later respondents answer: whoever sees the distribution before answering is
@@ -273,6 +283,15 @@
       navigator.clipboard.writeText(el.textContent.trim())
         .then(function () { said("Copied!"); })
         .catch(fallback);
+    }
+
+    function renderExploreSwitch() {
+      // Only offered once the report reaches somebody: a switch letting
+      // readers explore a report nobody can read is a switch about nothing.
+      const bar = document.getElementById("explore-bar");
+      const box = document.getElementById("explore-toggle");
+      bar.style.display = report.audience === "owner" ? "none" : "flex";
+      box.checked = !!report.explore;
     }
 
     function renderShare() {
@@ -465,7 +484,11 @@
     }
 
     document.getElementById("audience").onchange = function (e) {
-      report.audience = e.target.value; touch(); render();
+      report.audience = e.target.value; touch(); render(); renderExploreSwitch();
+    };
+
+    document.getElementById("explore-toggle").onchange = function (e) {
+      report.explore = e.target.checked; touch();
     };
 
     document.getElementById("add-question").onchange = function (e) {
@@ -495,6 +518,7 @@
         // database does not have.
         report = data.report;
         savedAudience = data.report.audience;
+        renderExploreSwitch();
         renderFindings(data.findings);
         render();
         renderShare();
@@ -514,6 +538,7 @@
     renderFindings({{ findings | tojson }});
     render();
     renderShare();
+    renderExploreSwitch();
     {% if saved %}document.getElementById("msg").textContent = "saved";{% endif %}
   </script>
 </body>

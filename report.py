@@ -45,7 +45,7 @@ VALUES = ("count", "percent")
 SORTS = ("schema", "frequency")
 OTHERS = ("show", "hide")
 
-EMPTY = {"audience": aggregate.OWNER, "blocks": []}
+EMPTY = {"audience": aggregate.OWNER, "blocks": [], "explore": False}
 
 
 def _one_of(value, allowed, default):
@@ -83,6 +83,10 @@ def parse(raw) -> dict:
     return {
         "audience": _one_of(raw.get("audience"), RANK, aggregate.OWNER),
         "blocks": [b for b in (raw.get("blocks") or []) if isinstance(b, dict)],
+        # Whether readers may cross two questions themselves. Off unless the
+        # owner turned it on: a citizen-science page wants it, a study about
+        # abuse does not, and the difference is not something to guess.
+        "explore": bool(raw.get("explore")),
         "updated_at": raw.get("updated_at"),
     }
 
@@ -128,7 +132,8 @@ def normalise(raw, schema: dict) -> dict:
             out["other"] = _one_of(block.get("other"), OTHERS, "show")
         blocks.append(out)
 
-    return {"audience": data["audience"], "blocks": blocks}
+    return {"audience": data["audience"], "blocks": blocks,
+            "explore": data["explore"]}
 
 
 def _elements(schema: dict):
@@ -194,6 +199,17 @@ def resolve(report: dict, schema: dict, viewer: str = aggregate.OWNER) -> list:
         else:
             out.append({**block, "audience": audience})
     return out
+
+
+def published_names(report: dict, schema: dict, viewer: str) -> set:
+    """Questions this viewer can already see on the page.
+
+    What bounds the exploration for a reader: crossing two questions is a way
+    of reading them, so a question the report does not publish is not one they
+    may put on an axis.
+    """
+    return {b["name"] for b in resolve(report, schema, viewer)
+            if b["kind"] == "question"}
 
 
 def validate(report: dict, schema: dict) -> list:
