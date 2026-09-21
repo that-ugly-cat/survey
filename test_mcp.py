@@ -211,6 +211,72 @@ with TestClient(main.app):
     ok(not hasattr(mcp_app, "delete_survey") and not hasattr(mcp_app, "delete_responses"),
        "deleting surveys and responses is not exposed at all")
 
+    print("\n--- the results surface ---")
+    db = main.get_db()
+    sid = db.execute("SELECT id FROM surveys WHERE slug='mine'").fetchone()["id"]
+    # Seven fives, three fours, two threes: two cells under the threshold, so the
+    # public view has something to mask and the owner view something to show.
+    for i in range(12):
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps({"consent_agree": ["agree"],
+                                     "q1": 5 if i < 7 else (4 if i < 10 else 3),
+                                     "_conditions": {"condition": "A" if i % 2 else "B"}})))
+    db.commit()
+    total = db.execute("SELECT COUNT(*) c FROM responses WHERE survey_id=?",
+                       (sid,)).fetchone()["c"]
+    db.close()
+    main._invalidate_results(sid)
+
+    res = mcp_app.question_summary("mine")
+    q1 = next(q for q in res["questions"] if q["name"] == "q1")
+    print(f"    [q1] exposed={q1['exposed']} n={q1['n']} missing={q1['missing']} "
+          f"cells={[(c['value'], c['n']) for c in q1['cells']]}")
+    ok(res["responses"] == total and q1["n"] == 12,
+       "the aggregates come back as numbers")
+    ok(q1["exposed"] == 12 and total == 13,
+       "and the one response that never consented never reached the question")
+    ok(q1["exposed"] == 12 and q1["missing"] == 0,
+       "with the three counts kept apart rather than conflated")
+
+    pub = mcp_app.question_summary("mine", name="q1", audience="public")
+    print(f"    [q1 public] {[(c['value'], c['n']) for c in pub['questions'][0]['cells']]}")
+    ok(any(c.get("suppressed") for c in pub["questions"][0]["cells"]),
+       "asking as the public shows what the public would be served")
+    ok(mcp_app.question_summary("mine", audience="everybody").get("error"),
+       "an audience nobody defined is refused")
+    ok(mcp_app.question_summary("mine", name="nope").get("error"),
+       "so is a question the schema does not have")
+    ok(mcp_app.question_summary("theirs").get("error"),
+       "and somebody else's survey stays out of reach")
+
+    split = mcp_app.question_summary("mine", by="condition")
+    got = next(q for q in split["questions"] if q["name"] == "q1")
+    ok(set(got.get("groups", {})) == {"A", "B"}, "by= splits the aggregate per arm")
+
+    print("\n--- the report, from the conversation ---")
+    ok(mcp_app.get_report("mine")["blocks"] == [], "a survey starts with an empty report")
+    res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public")
+    ok(res.get("error") and "open" in res["error"],
+       "publishing while the survey is still collecting is refused, and says why")
+    ok(mcp_app.get_report("mine")["audience"] == "owner", "and nothing was stored")
+
+    res = mcp_app.set_report("mine", [
+        {"kind": "text", "md": {"en": "## What we found"}},
+        {"kind": "all_questions"},
+        {"kind": "nonsense"},
+    ], audience="public", publish_on_open=True)
+    print(f"    [stored] {[b['kind'] for b in res['blocks']]} dropped={res['dropped']}")
+    ok([b["kind"] for b in res["blocks"]] == ["text", "all_questions"],
+       "forced, it stores the blocks it understands")
+    ok(res["dropped"] == 1, "and says how many it threw away")
+    ok(res["url"] == "/s/mine/results", "handing back the link it just created")
+    ok(mcp_app.get_report("mine")["audience"] == "public", "the report is published")
+
+    mcp_app.set_active("mine", False)
+    res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public")
+    ok(not res.get("error"), "on a closed survey publishing needs no override")
+    mcp_app.set_active("mine", True)
+
     print("\n--- key management in the admin ---")
     t = main.templates.get_template("admin.html")
     class _Req:

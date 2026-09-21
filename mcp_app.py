@@ -33,9 +33,11 @@ import re
 
 from mcp.server.mcpserver import MCPServer
 
+import aggregate
 import auth
 import flow
 import main
+import report as report_model
 
 mcp = MCPServer(
     name="survey",
@@ -44,8 +46,12 @@ mcp = MCPServer(
         "collected responses. Start with list_surveys. preview_flow answers what "
         "a participant in each arm walks through, and validate_survey reports what "
         "is broken — both read the schema, so neither needs the questionnaire to be "
-        "open in a browser. Reads are free; confirm with the user before any write, "
-        "and note that saving a pool resets its balance counters."
+        "open in a browser. question_summary gives what people answered, with the "
+        "denominators kept apart, and takes an audience so you can see what a "
+        "published results page exposes. Reads are free; confirm with the user "
+        "before any write, and note that saving a pool resets its balance counters, "
+        "and that publishing a report while the survey is still collecting anchors "
+        "whoever reads it before answering."
     ),
 )
 
@@ -514,5 +520,156 @@ def set_active(slug: str, active: bool) -> dict:
                    (1 if active else 0, row["id"]))
         db.commit()
         return {"slug": slug, "active": bool(active)}
+    finally:
+        db.close()
+
+
+# --- results ---
+
+def _report_of(row) -> dict:
+    return report_model.normalise(row["report_json"], _schema(row))
+
+
+@mcp.tool()
+def question_summary(slug: str, name: str = None, by: str = None,
+                     audience: str = "owner") -> dict:
+    """What people answered, as one typed aggregate per question.
+
+    This is the same computation the results page draws, handed over as numbers.
+    Every aggregate carries three counts that differ under branching and
+    randomization and are wrong to conflate: `exposed` (reached the question at
+    all), `n` (answered it) and `missing` (reached it and left it blank). A
+    percentage quoted without the denominator it belongs to is the error this
+    surface exists to make hard.
+
+    `name` restricts to one question. `by` splits by a condition variable, which
+    is the owner's view of an experiment. `audience` set to "respondent" or
+    "public" returns what that level would be served instead — masked cells,
+    no open answers — which is how to check what a published report exposes
+    without opening it in another browser.
+
+    Open answers are returned only when a single question is asked for by name,
+    capped at 200, because a survey-wide call would otherwise return every word
+    anybody wrote.
+    """
+    if audience not in aggregate.AUDIENCES:
+        return _fail(f"audience must be one of {', '.join(aggregate.AUDIENCES)}")
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        schema = _schema(row)
+        if name and name not in report_model.question_names(schema):
+            return _fail(f"no question '{name}' in '{slug}'")
+        pools = main._pool_rows(db, row["id"])
+        responses = [json.loads(r["response_json"]) for r in db.execute(
+            "SELECT response_json FROM responses WHERE survey_id = ?", (row["id"],))]
+        out = aggregate.summarise(schema, pools, responses,
+                                  only=[name] if name else None, by=by)
+
+        questions = []
+        for q in out["questions"]:
+            if audience != aggregate.OWNER:
+                q = aggregate.for_audience(q, audience)
+            elif not name:
+                q = {k: v for k, v in q.items() if k not in ("texts", "other_texts")}
+            elif isinstance(q.get("texts"), list) and len(q["texts"]) > 200:
+                q = {**q, "texts": q["texts"][:200], "texts_truncated": True}
+            questions.append(q)
+        return {"slug": slug, "responses": out["responses"],
+                "audience": audience, "by": by, "questions": questions}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def get_report(slug: str) -> dict:
+    """The results report: which blocks the page carries, in order, and how far
+    each of them may travel.
+
+    `all_questions` is one block standing for every question in schema order,
+    resolved when the page is drawn rather than when it was saved, so it keeps
+    up with the questionnaire. `findings` reports blocks naming a question that
+    no longer exists, the same question twice, and text written in only some of
+    the languages the questionnaire speaks.
+    """
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        schema = _schema(row)
+        stored = _report_of(row)
+        published = stored["audience"] == aggregate.PUBLIC
+        return {
+            "slug": slug,
+            "audience": stored["audience"],
+            "blocks": stored["blocks"],
+            "url": f"/s/{slug}/results" if published else None,
+            "findings": report_model.validate(stored, schema),
+        }
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def set_report(slug: str, blocks: list, audience: str = "owner",
+               publish_on_open: bool = False) -> dict:
+    """Replace the results report.
+
+    `blocks` is an ordered list. Three kinds and no others:
+      {"kind": "text", "md": {"en": "## Heading", "it": "## Titolo"}}
+      {"kind": "question", "name": "…", "chart": "bar", "value": "count"}
+      {"kind": "all_questions"}
+    Each may carry "audience" to travel less far than the report does; the
+    report's own level is the ceiling, and anything unknown — a block kind, an
+    audience, a chart a question's shape cannot take — is dropped rather than
+    stored, because what is stored here is served to strangers.
+
+    Publishing beyond the owner while the survey is still **open** is refused
+    unless `publish_on_open` is set. Results visible during fielding change what
+    later respondents answer: whoever sees the distribution before answering is
+    anchored by it. That is a decision somebody may legitimately take, and this
+    makes them take it rather than discover it. It is written to the application
+    log either way.
+
+    Open answers never reach a published page whatever this says, and cells
+    under five answers are masked. Use question_summary(audience="public") to
+    see what a reader outside would actually get.
+    """
+    if audience not in report_model.RANK:
+        return _fail(f"audience must be one of {', '.join(report_model.RANK)}")
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        schema = _schema(row)
+        clean = report_model.normalise({"audience": audience, "blocks": blocks}, schema)
+        reaches_out = clean["audience"] != aggregate.OWNER
+
+        if reaches_out and row["active"] and not publish_on_open:
+            return _fail(
+                f"'{slug}' is open and still collecting. Publishing its results now "
+                f"anchors whoever sees them before answering. Pass publish_on_open "
+                f"to do it anyway, or close the survey first with set_active."
+            )
+        if reaches_out:
+            main.log.info("report published (%s) on survey %s by user %s via mcp",
+                          clean["audience"], slug, auth.current_caller()["id"])
+        db.execute("UPDATE surveys SET report_json = ? WHERE id = ?",
+                   (json.dumps(clean, ensure_ascii=False), row["id"]))
+        db.commit()
+        main._invalidate_results(row["id"])
+        dropped = len(blocks) - len(clean["blocks"])
+        return {
+            "slug": slug,
+            "audience": clean["audience"],
+            "blocks": clean["blocks"],
+            "dropped": dropped,
+            "url": f"/s/{slug}/results" if clean["audience"] == aggregate.PUBLIC else None,
+            "findings": report_model.validate(clean, schema),
+        }
     finally:
         db.close()

@@ -223,8 +223,13 @@ Two notes for whoever writes the renderer:
 
 ## 10. What this touches elsewhere
 
-The aggregation module is also the natural body of an MCP tool (`question_summary`), so the
-same numbers reach a conversation without a browser — the reason `preview_flow` exists.
+The aggregation module is also the body of three MCP tools, so the same numbers reach a
+conversation without a browser — the reason `preview_flow` exists. `question_summary` returns
+the aggregates, and takes an `audience`, which makes "what would the public see" answerable
+without publishing anything. `get_report` and `set_report` read and replace the document,
+with the same normalisation the editor's save goes through and one guard of their own:
+publishing beyond the owner while the survey is still collecting is refused unless the caller
+says `publish_on_open`.
 
 It also raises the stakes on the open `schema_version` item: forcing a schema change over
 collected answers now moves a page that strangers may be reading, and nothing in the data

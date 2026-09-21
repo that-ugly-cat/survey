@@ -196,6 +196,13 @@ set, or the transport's DNS-rebinding check refuses every proxied request.
 `get_responses` (full payloads, including `_conditions` and `_timing`), and `response_stats`,
 whose `never_answered` list is the quick way to find a branch nobody reaches.
 
+**The results, as numbers.** `question_summary` returns what people answered, one typed
+aggregate per question, with `exposed`, `n` and `missing` kept apart because branching and
+randomization make them differ. `by` splits by randomization arm; `audience` set to
+`public` returns what a published page would serve instead — masked cells, no open answers —
+which is how to see what a report exposes without opening it in another browser.
+`get_report` and `set_report` read and replace the results document itself.
+
 **Two tools that read the schema instead of the browser.** `preview_flow` returns, for every
 arm at once, the pages a participant walks through in the order they are shown and the
 questions on each. Visibility that depends on an answer cannot be decided in advance, so those
@@ -206,13 +213,16 @@ placeholder choice values that make an export unreadable, pool pages that do not
 arms that reach no questions.
 
 **Writing, with guards.** `create_survey`, `update_schema`, `set_pool`, `delete_pool`,
-`reset_counters`, `set_active`. Three guards matter:
+`reset_counters`, `set_active`, `set_report`. Four guards matter:
 
 - A schema with structural errors is refused. Pass `force` to override.
 - Editing the schema of a survey that already holds responses is refused unless forced: those
   answers were given to the old wording, and reinterpreting them silently is the one mistake a
   backup does not undo. The web edit form carries the same rule — it refuses until the person
   ticks a box naming that consequence, and writes a line to the application log when they do.
+- Publishing a report beyond its owner while the survey is **still open** is refused unless
+  `publish_on_open` is passed. Results visible during fielding change what later respondents
+  answer, and that is a decision to take rather than to discover. Either way it is logged.
 - Deleting surveys and deleting responses are **not exposed at all**. They stay in the web
   admin, where a human is holding the mouse.
 
