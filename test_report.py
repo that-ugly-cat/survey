@@ -202,5 +202,25 @@ with TestClient(main.app) as client:
     ok("Results report" in r.text and "visible to anyone" in r.text,
        "the manage page says the report exists and how far it reaches")
 
+    print("\n--- the links to hand out ---")
+    ok("/s/demo/results<" in r.text.replace("</code>", "<"),
+       "a published report puts its own link on the manage page")
+    ok("/s/demo/results/embed" in r.text and "iframe" in r.text,
+       "with an iframe snippet for putting it inside another site")
+    ok(r.text.count("<img src=\"data:image/png;base64") >= 2,
+       "and a QR beside it, as the questionnaire link already had")
+
+    ed = client.get("/admin/surveys/demo/report", cookies=owner_cookie)
+    ok("share-url" in ed.text and "savedAudience" in ed.text,
+       "the editor carries the same link, driven by what is saved")
+
+    client.post("/admin/surveys/demo/report", cookies=owner_cookie,
+                json={"audience": "owner", "blocks": [{"kind": "all_questions"}]})
+    private = client.get("/admin/surveys/demo", cookies=owner_cookie)
+    ok("nothing to share yet" in private.text,
+       "a private report offers no link: there would be nothing behind it")
+    ok(private.text.count("<img src=\"data:image/png;base64") == 1,
+       "and no QR for a page that answers 404")
+
 print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: " + "; ".join(FAILED)))
 sys.exit(1 if FAILED else 0)

@@ -53,6 +53,12 @@
     .qr-wrap { text-align: center; }
     .qr-wrap img { width: 120px; height: 120px; border-radius: 6px; background: #fff; padding: 4px; }
     .qr-wrap .hint { margin-top: 0.35rem; }
+    .share-sub {
+      font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #718096; margin: 1.8rem 0 0.7rem; font-weight: 600;
+    }
+    .url-box.mt { margin-top: 0.8rem; }
+    .url-box code { overflow-x: auto; }
 
     .btn-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
     .btn {
@@ -331,6 +337,41 @@
         </div>
         {% endif %}
       </div>
+
+      <h3 class="share-sub">Results</h3>
+      {% if report_audience == 'public' %}
+      <div class="share-row">
+        <div class="share-main">
+          <div class="url-box">
+            <code id="results-url">{{ results_url }}</code>
+            <button class="btn btn-blue btn-sm" onclick="copyBox(this, 'results-url')">Copy</button>
+          </div>
+          <p class="hint mt">The results page, open to anyone with the link. It updates by itself
+            as answers arrive.</p>
+          <div class="url-box mt">
+            <code id="embed-code">&lt;iframe src="{{ embed_url }}" width="100%" height="900"
+              style="border:0"&gt;&lt;/iframe&gt;</code>
+            <button class="btn btn-sm" onclick="copyBox(this, 'embed-code')">Copy</button>
+          </div>
+          <p class="hint mt">To put the same page inside another site, without the heading.</p>
+        </div>
+        {% if results_qr %}
+        <div class="qr-wrap">
+          <img src="{{ results_qr }}" alt="QR code for {{ results_url }}">
+          <p class="hint">Right-click to save.</p>
+        </div>
+        {% endif %}
+      </div>
+      {% elif report_audience == 'respondent' %}
+      <p class="hint">The results are shown to each respondent at the end of the questionnaire,
+        with their own answers marked. There is no link to hand out: each one is personal and
+        is created when that person submits.
+        <a href="/admin/surveys/{{ slug }}/results">See what they see →</a></p>
+      {% else %}
+      <p class="hint">This survey's report is private to you, so there is nothing to share yet.
+        <a href="/admin/surveys/{{ slug }}/report">Open the report editor →</a> to choose how far
+        it may travel.</p>
+      {% endif %}
     </section>
 
     <section>
@@ -485,14 +526,35 @@
       }
     });
 
-    function copyUrl() {
-      var btn = document.querySelector('.url-box button');
-      navigator.clipboard.writeText(document.getElementById('public-url').textContent).then(function() {
-        var orig = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(function() { btn.textContent = orig; }, 1500);
-      });
+    // The clipboard API is refused outright in some contexts — an insecure
+    // origin, a denied permission, an embedded frame — and the promise rejects
+    // with nothing on screen to show for it. Falling back to selecting the text
+    // leaves the person one keystroke away instead of wondering whether the
+    // click registered.
+    function selectBox(el) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
     }
+
+    function copyBox(btn, id) {
+      const el = document.getElementById(id);
+      const said = function (text) {
+        const orig = btn.dataset.label || btn.textContent;
+        btn.dataset.label = orig;
+        btn.textContent = text;
+        setTimeout(function () { btn.textContent = orig; }, 1800);
+      };
+      const fallback = function () { selectBox(el); said("Select and copy"); };
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return fallback();
+      navigator.clipboard.writeText(el.textContent.trim())
+        .then(function () { said("Copied!"); })
+        .catch(fallback);
+    }
+
+    function copyUrl() { copyBox(document.querySelector('.url-box button'), 'public-url'); }
   </script>
 </body>
 </html>

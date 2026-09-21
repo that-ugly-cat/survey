@@ -111,6 +111,25 @@
       border-top: 1px solid #2d3148; margin-top: 1.5rem;
     }
     .savebar .msg { font-size: 0.78rem; color: #718096; }
+
+    .share {
+      background: #0f1f26; border: 1px solid #2a4a55; border-radius: 10px;
+      padding: 0.9rem 1.1rem; margin-bottom: 1rem;
+    }
+    .share .lbl {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: #5f9ea8; margin-bottom: 0.5rem;
+    }
+    .share .box {
+      display: flex; gap: 0.6rem; align-items: center;
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 6px;
+      padding: 0.5rem 0.75rem; margin-bottom: 0.5rem;
+    }
+    .share code {
+      font-family: monospace; font-size: 0.78rem; color: #63b3ed; flex: 1;
+      overflow-wrap: anywhere;
+    }
+    .share .hint { font-size: 0.72rem; color: #4a5568; }
   </style>
 </head>
 <body>
@@ -149,6 +168,19 @@
       application log so that it stays a choice rather than an accident.
     </div>
 
+    <div class="share" id="share" style="display:none">
+      <div class="lbl" id="share-label"></div>
+      <div class="box">
+        <code id="share-url"></code>
+        <button class="btn" onclick="copyBox(this, 'share-url')">Copy</button>
+      </div>
+      <div class="box" id="embed-box">
+        <code id="share-embed"></code>
+        <button class="btn" onclick="copyBox(this, 'share-embed')">Copy</button>
+      </div>
+      <p class="hint" id="share-hint"></p>
+    </div>
+
     <div id="findings"></div>
     <div id="blocks"></div>
 
@@ -177,6 +209,10 @@
     const BY_NAME   = Object.fromEntries(QUESTIONS.map(q => [q.name, q]));
 
     let report = {{ report | tojson }};
+    // What is stored, which is what the link actually serves. The selector can
+    // say "public" for as long as it likes; until Save runs, the URL is a 404.
+    let savedAudience = {{ saved_audience | tojson }};
+    const BASE = location.origin + "/s/" + SLUG + "/results";
     let dirty  = false;
     let dragFrom = null;
 
@@ -209,6 +245,61 @@
     function touch() {
       dirty = true;
       document.getElementById("msg").textContent = "unsaved changes";
+    }
+
+    // The clipboard API is refused outright in some contexts — an insecure
+    // origin, a denied permission, an embedded frame — and the promise rejects
+    // with nothing on screen to show for it. Falling back to selecting the text
+    // leaves the person one keystroke away instead of wondering whether the
+    // click registered.
+    function selectBox(el) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    function copyBox(btn, id) {
+      const el = document.getElementById(id);
+      const said = function (text) {
+        const orig = btn.dataset.label || btn.textContent;
+        btn.dataset.label = orig;
+        btn.textContent = text;
+        setTimeout(function () { btn.textContent = orig; }, 1800);
+      };
+      const fallback = function () { selectBox(el); said("Select and copy"); };
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return fallback();
+      navigator.clipboard.writeText(el.textContent.trim())
+        .then(function () { said("Copied!"); })
+        .catch(fallback);
+    }
+
+    function renderShare() {
+      const box = document.getElementById("share");
+      const embed = document.getElementById("embed-box");
+      if (savedAudience === "public") {
+        box.style.display = "block";
+        embed.style.display = "flex";
+        document.getElementById("share-label").textContent = "Link to share";
+        document.getElementById("share-url").textContent = BASE;
+        document.getElementById("share-embed").textContent =
+          '<iframe src="' + BASE + '/embed" width="100%" height="900" style="border:0"></iframe>';
+        document.getElementById("share-hint").textContent =
+          "Open to anyone with the link, and it keeps up with the answers by itself. "
+          + "The second one puts the same page inside another site.";
+      } else if (savedAudience === "respondent") {
+        box.style.display = "block";
+        embed.style.display = "none";
+        document.getElementById("share-label").textContent = "No link to hand out";
+        document.getElementById("share-url").textContent = BASE + "?r=…";
+        document.getElementById("share-hint").textContent =
+          "Each respondent gets their own link at the end of the questionnaire, with their "
+          + "own answers marked. There is no shared one, and the page refuses a link nobody "
+          + "was given.";
+      } else {
+        box.style.display = "none";
+      }
     }
 
     function move(from, to) {
@@ -403,8 +494,10 @@
         // back rather than what it sent: otherwise the page shows a report the
         // database does not have.
         report = data.report;
+        savedAudience = data.report.audience;
         renderFindings(data.findings);
         render();
+        renderShare();
         dirty = false;
         msg.textContent = "saved";
       } catch (err) {
@@ -420,6 +513,7 @@
 
     renderFindings({{ findings | tojson }});
     render();
+    renderShare();
     {% if saved %}document.getElementById("msg").textContent = "saved";{% endif %}
   </script>
 </body>

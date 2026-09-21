@@ -1023,6 +1023,12 @@ async def manage_survey(slug: str, request: Request):
         "files_count": files_count,
         "report_blocks": len(stored_report["blocks"]),
         "report_audience": stored_report["audience"],
+        "results_url": f"{public_url}/results",
+        "embed_url": f"{public_url}/results/embed",
+        # Only worth a QR when there is something to point it at: a report the
+        # owner kept private has no link to hand anybody.
+        "results_qr": (totp.qr_data_uri(f"{public_url}/results")
+                       if stored_report["audience"] == aggregate.PUBLIC else None),
         "langs": langs,
         "public_url": public_url,
         "qr": totp.qr_data_uri(public_url),
@@ -1322,6 +1328,9 @@ def _report_context(db, survey, slug: str, saved: bool = False) -> dict:
         "active": bool(survey["active"]),
         "responses": _response_count(db, survey["id"]),
         "report": stored,
+        # The link as saved, not as the selector currently reads: offering one
+        # before the change is stored would hand out a URL that answers 404.
+        "saved_audience": stored["audience"],
         "questions": questions,
         "locales": report_model.locales(schema),
         "findings": report_model.validate(stored, schema),
