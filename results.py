@@ -54,6 +54,7 @@ STRINGS = {
         "as_label": "looking as", "as_me": "me", "as_resp": "a respondent",
         "as_public": "anyone",
         "previewing": "This is what {who} sees. Anything held back for them is held back here too.",
+        "other": "Other",
         "everyone": "everyone", "by": "by",
     },
     "it": {
@@ -86,6 +87,7 @@ STRINGS = {
         "as_label": "guardo come", "as_me": "me", "as_resp": "chi ha risposto",
         "as_public": "chiunque",
         "previewing": "Questo è quello che vede {who}. Quello che a loro è nascosto è nascosto anche qui.",
+        "other": "Altro",
         "everyone": "tutti", "by": "per",
     },
     "de": {
@@ -116,6 +118,7 @@ STRINGS = {
         "as_label": "Ansicht als", "as_me": "ich", "as_resp": "Teilnehmende",
         "as_public": "alle",
         "previewing": "So sieht es {who}. Was dort verborgen bleibt, bleibt auch hier verborgen.",
+        "other": "Andere",
         "everyone": "alle", "by": "nach",
     },
     "fr": {
@@ -146,6 +149,7 @@ STRINGS = {
         "as_label": "vu comme", "as_me": "moi", "as_resp": "un répondant",
         "as_public": "tout le monde",
         "previewing": "Voici ce que voit {who}. Ce qui leur est masqué l'est ici aussi.",
+        "other": "Autre",
         "everyone": "tout le monde", "by": "par",
     },
 }
@@ -199,6 +203,11 @@ def _choice_labels(el: dict, locale: str) -> dict:
             out[c.get("value")] = loc(c.get("text", c.get("value")), locale)
         else:
             out[c] = str(c)
+    if el.get("showOtherItem"):
+        # The author already wrote a word for this bucket, in the language of
+        # the questionnaire. Falling back to a hardcoded "Other" puts English
+        # on the axis of an Italian chart.
+        out["other"] = loc(el.get("otherText"), locale) or strings(locale)["other"]
     return out
 
 

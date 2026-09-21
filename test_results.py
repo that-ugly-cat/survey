@@ -87,6 +87,26 @@ ok(en_by["ruolo"]["charts"][0]["series"][0]["data"] == [7, 6, 2],
    "the owner sees the real counts even in a published block: how far a block "
    "travels decides who sees it, not what the owner is shown")
 
+print("\n--- the other bucket keeps the author's word ---")
+OTHER_SCHEMA = {"locale": "it", "pages": [{"name": "p", "elements": [
+    {"type": "radiogroup", "name": "ruolo", "title": "Ruolo", "showOtherItem": True,
+     "otherText": "Altro (scrivilo tu)",
+     "choices": [{"value": "a", "text": "Ricerca"}]}]}]}
+OTHER_R = [{"ruolo": "a"}] * 6 + [{"ruolo": "other", "ruolo-Comment": "x"}] * 6
+built = results.build(OTHER_SCHEMA, [], {"audience": "owner", "blocks": [
+    {"kind": "question", "name": "ruolo"}]}, OTHER_R, "owner", "it")
+labels = built["blocks"][0]["charts"][0]["labels"]
+show("labels", labels)
+ok("Altro (scrivilo tu)" in labels,
+   "the word the author wrote, not a hardcoded English 'Other' on an Italian axis")
+plain = results.build({"locale": "it", "pages": [{"name": "p", "elements": [
+    {"type": "radiogroup", "name": "r", "showOtherItem": True,
+     "choices": [{"value": "a", "text": "A"}]}]}]}, [],
+    {"audience": "owner", "blocks": [{"kind": "question", "name": "r"}]},
+    [{"r": "a"}] * 6 + [{"r": "other"}] * 6, "owner", "it")
+ok("Altro" in plain["blocks"][0]["charts"][0]["labels"],
+   "and with no otherText set, the page's own word for it, in the page's language")
+
 print("\n--- what each audience is built ---")
 pub = results.build(SCHEMA, [], REPORT, ANSWERS, "public", "en")
 names = [b.get("name") for b in pub["blocks"] if b["kind"] == "question"]
