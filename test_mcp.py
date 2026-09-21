@@ -272,6 +272,20 @@ with TestClient(main.app):
     ok(res["url"] == "/s/mine/results", "handing back the link it just created")
     ok(mcp_app.get_report("mine")["audience"] == "public", "the report is published")
 
+    print("\n--- a setting that does not unset itself ---")
+    res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public",
+                             publish_on_open=True, explore=True)
+    ok(res["explore"] is True, "readers can be let in from here too")
+    res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public",
+                             publish_on_open=True)
+    ok(res["explore"] is True,
+       "and a later write that says nothing about it leaves it alone, rather than "
+       "switching off what somebody turned on in the editor")
+    res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public",
+                             publish_on_open=True, explore=False)
+    ok(res["explore"] is False and mcp_app.get_report("mine")["explore"] is False,
+       "saying so explicitly turns it off")
+
     mcp_app.set_active("mine", False)
     res = mcp_app.set_report("mine", [{"kind": "all_questions"}], audience="public")
     ok(not res.get("error"), "on a closed survey publishing needs no override")

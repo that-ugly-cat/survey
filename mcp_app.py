@@ -605,6 +605,7 @@ def get_report(slug: str) -> dict:
         return {
             "slug": slug,
             "audience": stored["audience"],
+            "explore": stored["explore"],
             "blocks": stored["blocks"],
             "url": f"/s/{slug}/results" if published else None,
             "findings": report_model.validate(stored, schema),
@@ -615,7 +616,7 @@ def get_report(slug: str) -> dict:
 
 @mcp.tool()
 def set_report(slug: str, blocks: list, audience: str = "owner",
-               publish_on_open: bool = False) -> dict:
+               publish_on_open: bool = False, explore: bool = None) -> dict:
     """Replace the results report.
 
     `blocks` is an ordered list. Three kinds and no others:
@@ -634,6 +635,10 @@ def set_report(slug: str, blocks: list, audience: str = "owner",
     makes them take it rather than discover it. It is written to the application
     log either way.
 
+    `explore` lets readers cross two published questions themselves, which is
+    what a citizen-science page wants and what a study about abuse does not.
+    Leaving it out keeps whatever is set rather than switching it off.
+
     Open answers never reach a published page whatever this says, and cells
     under five answers are masked. Use question_summary(audience="public") to
     see what a reader outside would actually get.
@@ -646,7 +651,14 @@ def set_report(slug: str, blocks: list, audience: str = "owner",
         if not row:
             return _fail(f"no survey '{slug}'")
         schema = _schema(row)
-        clean = report_model.normalise({"audience": audience, "blocks": blocks}, schema)
+        # `explore` left out means leave it as it is. Defaulting it to false
+        # would make any write from here silently switch off something the
+        # owner turned on in the editor, which is the worst kind of surprise:
+        # a setting that unsets itself when somebody edits something else.
+        current = report_model.normalise(row["report_json"], schema)
+        wanted = current["explore"] if explore is None else bool(explore)
+        clean = report_model.normalise(
+            {"audience": audience, "blocks": blocks, "explore": wanted}, schema)
         reaches_out = clean["audience"] != aggregate.OWNER
 
         if reaches_out and row["active"] and not publish_on_open:
@@ -666,6 +678,7 @@ def set_report(slug: str, blocks: list, audience: str = "owner",
         return {
             "slug": slug,
             "audience": clean["audience"],
+            "explore": clean["explore"],
             "blocks": clean["blocks"],
             "dropped": dropped,
             "url": f"/s/{slug}/results" if clean["audience"] == aggregate.PUBLIC else None,
