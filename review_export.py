@@ -237,6 +237,105 @@ def _matrix_table(doc, el):
     doc.add_paragraph()
 
 
+# A matrix whose cells are questions in their own right (matrixdropdown,
+# matrixdynamic) needs two things a plain matrix does not: the shape of the
+# grid, and what each column actually asks. The grid on its own would say that
+# a table is there without saying it holds a drop-down of five options.
+
+CELL_SYMBOLS = {
+    "radiogroup": "○", "checkbox": "☐", "dropdown": "▾", "tagbox": "▾",
+    "text": "▭", "comment": "▭", "boolean": "○ ○", "rating": "1–5",
+    "expression": "=",
+}
+
+CELL_FORMATS = {
+    "radiogroup": "one answer", "checkbox": "several answers",
+    "dropdown": "drop-down", "tagbox": "multi-select drop-down",
+    "text": "short text field", "comment": "open text box",
+    "boolean": "yes / no switch", "rating": "rating scale",
+    "expression": "computed, not asked",
+}
+
+CHOICE_CELLS = ("radiogroup", "checkbox", "dropdown", "tagbox")
+
+
+def _column_title(col) -> str:
+    if isinstance(col, dict):
+        return loc_text(col.get("title") or col.get("name", ""))
+    return loc_text(col)
+
+
+def _cell_type(el, col) -> str:
+    default = el.get("cellType", "dropdown")
+    return col.get("cellType", default) if isinstance(col, dict) else default
+
+
+def _matrix_grid(doc, el, row_labels):
+    """The grid of a matrix of questions: one column per question, each cell
+    marked with the shape of the answer that column takes."""
+    columns = el.get("columns", [])
+    table = doc.add_table(rows=1, cols=len(columns) + 1)
+    table.style = "Table Grid"
+    hdr = table.rows[0].cells
+    for i, text in enumerate([""] + [_column_title(c) for c in columns]):
+        p = hdr[i].paragraphs[0]
+        run = p.add_run(text)
+        run.bold = True
+        run.font.size = Pt(8)
+        if i:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    for label in row_labels:
+        cells = table.add_row().cells
+        run = cells[0].paragraphs[0].add_run(label)
+        run.font.size = Pt(9)
+        for cell, col in zip(cells[1:], columns):
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.add_run(CELL_SYMBOLS.get(_cell_type(el, col), "▭")).font.size = Pt(9)
+            cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+    doc.add_paragraph()
+
+
+def _matrix_column_legend(doc, el):
+    """What each column asks, and with which options. A column carries its own
+    choices or inherits the question's, and the grid cannot show which."""
+    for col in el.get("columns", []):
+        kind = _cell_type(el, col)
+        line = f"{_column_title(col)} — {CELL_FORMATS.get(kind, kind)}"
+        choices = (col.get("choices") if isinstance(col, dict) else None) or el.get("choices") or []
+        if kind in CHOICE_CELLS and choices:
+            line += ": " + "; ".join(
+                loc_text(c.get("text", c.get("value")) if isinstance(c, dict) else c)
+                for c in choices
+            )
+        if isinstance(col, dict) and col.get("isRequired"):
+            line += "   (required)"
+        _answer_line(doc, "• " + line)
+
+
+def _image_choice_lines(doc, choices):
+    """Image options, each with the file it points at. The pictures are not in
+    this document, and a link that resolves to nothing reads exactly like one
+    that works until somebody opens the questionnaire."""
+    for c in choices:
+        if not isinstance(c, dict):
+            _choice_lines(doc, [c], "▫")
+            continue
+        label = loc_text(c.get("text") or c.get("value", ""))
+        link = loc_text(c.get("imageLink", ""))
+        if link.startswith("data:"):
+            where = "inline image (data URI)"
+        else:
+            where = link or "no image set"
+        p = doc.add_paragraph()
+        p.paragraph_format.left_indent = Twips(360)
+        p.paragraph_format.space_after = Pt(2)
+        p.add_run(f"▫  {label} — ")
+        run = p.add_run(where)
+        run.font.color.rgb = GRAY
+        run.font.size = Pt(9)
+
+
 def _locale_counts(el):
     """(counts, total): how many of the element's localized strings carry each
     locale, and how many localized strings there are in total."""
@@ -335,6 +434,34 @@ def _render_question(doc, el, survey_locales):
         _answer_line(doc, "Answer: " + hints.get(el.get("inputType"), "short text field") + ".")
     elif kind == "matrix":
         _matrix_table(doc, el)
+    elif kind == "matrixdropdown":
+        _matrix_grid(doc, el, [
+            loc_text(r.get("text", r.get("value")) if isinstance(r, dict) else r)
+            for r in el.get("rows", [])
+        ])
+        _matrix_column_legend(doc, el)
+    elif kind == "matrixdynamic":
+        initial = el.get("rowCount", 2)
+        text = f"Answer: a table the participant fills in, starting with {initial} row"
+        text += "" if initial == 1 else "s"
+        if el.get("maxRowCount"):
+            text += f" and capped at {el['maxRowCount']}"
+        _answer_line(doc, text + ". Every row repeats the columns below.")
+        _matrix_grid(doc, el, [str(n) for n in range(1, min(max(initial, 1), 3) + 1)])
+        _matrix_column_legend(doc, el)
+    elif kind == "ranking":
+        if el.get("selectToRankEnabled"):
+            _answer_line(doc, "Answer: drag the options worth ranking into the ranked list; "
+                              "the rest stay unranked.")
+        else:
+            _answer_line(doc, "Answer: drag every option into order of preference.")
+        _choice_lines(doc, el.get("choices", []), "↕")
+        _answer_line(doc, "(the export stores the values in the order the participant left them)")
+    elif kind == "imagepicker":
+        what = "video" if el.get("contentMode") == "video" else "image"
+        _answer_line(doc, "Answer: choose "
+                     + (f"one or more {what}s." if el.get("multiSelect") else f"one {what}."))
+        _image_choice_lines(doc, el.get("choices", []))
     elif kind == "expression":
         _note(doc, f"Computed value (not asked): {el.get('expression', '')}")
     else:

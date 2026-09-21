@@ -58,7 +58,11 @@ or JSON.
 - **Questionnaire review export (DOCX)** — renders the survey itself as a Word document for
   circulating to colleagues: primary-language texts, answer formats per question type,
   branching logic in plain English, the survey's randomization pools, and per-element
-  translation coverage flags (present / partial / missing).
+  translation coverage flags (present / partial / missing). Every question type SurveyJS
+  renders on screen is rendered here too — including the four that are tables of questions
+  rather than questions: `ranking`, `imagepicker` (with the file each option points at, so a
+  dead link is reviewable on paper), `matrixdropdown` and `matrixdynamic`, whose grids come
+  with a legend saying what each column asks and with which options.
 - Built on the [SurveyJS Form Library](https://surveyjs.io/) (MIT).
 
 ## Quick start
@@ -125,12 +129,13 @@ From there:
 
 ## Checks
 
-Six self-contained scripts, no test framework and no running server. They build their own
+Eight self-contained scripts, no test framework and no running server. They build their own
 temporary database, so they never touch real data:
 
 ```bash
 python test_flow.py && python test_mcp.py && python test_page_order.py
 python test_panel.py && python test_panel_migration.py && python test_purge.py
+python test_edit_guard.py && python test_review.py
 ```
 
 `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -141,13 +146,17 @@ cannot drift from the code it checks. `test_panel.py` covers panel entry and ret
 tokens, outcome routing, and the assignment ledger. `test_panel_migration.py` upgrades a
 database in the pre-panel shape and checks the backfill, then compiles and renders every
 template. `test_purge.py` covers emptying a survey of its answers: who is allowed to, what
-goes with them, and what must survive.
+goes with them, and what must survive. `test_edit_guard.py` covers the web edit form's refusal
+to replace a questionnaire over collected answers, the confirmed path and its log line.
+`test_review.py` renders the review document and reads it back with python-docx, checking that
+every question type the platform offers reaches the page — and that one nobody taught it still
+reports itself as unrendered, so the first check means something.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one
@@ -216,6 +225,7 @@ static-data/      — reference JSON (cantons, countries) to upload via the file
 test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, assignment ledger
 test_panel_migration.py — migrating an existing database, plus template rendering
 test_purge.py     — emptying a survey of its answers: the guard, what goes, what stays
+test_review.py    — the review DOCX: every question type reaches the page, read back from it
 ```
 
 ## Deployment
