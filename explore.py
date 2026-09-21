@@ -15,8 +15,8 @@ Readers can be let in, one survey at a time, because a citizen-science page is
 worth more when the people who contributed can turn the data over themselves.
 What they get is the association and not the people behind it: the statistic
 and the effect size are computed on everything, while the cells of any table
-come back masked under the same rule the charts use, the floor rises to twenty
-complete pairs, and they may only cross questions the report already publishes.
+come back masked under the same rule the charts use, and they may only cross
+questions the report already publishes.
 Off unless the owner turns it on, and never on by default: the reason to open
 this door for a bird count is not a reason to open it for a study about
 abuse.
@@ -185,11 +185,11 @@ def associate(schema: dict, responses: list, x_id: str, y_id: str,
     """Whether two variables move together, with the test chosen from shapes.
 
     `audience` other than the owner masks the cells of whatever table comes
-    back and raises the floor: a reader gets the association and not the people
-    behind it. `allowed` bounds which variables they may reach at all.
+    back: a reader gets the association and not the people behind it. `allowed`
+    bounds which variables they may reach at all. The floor is the same for
+    everybody — whether a page should be open at all is the decision of whoever
+    runs the study, and it is taken once, with the switch.
     """
-    if audience != aggregate.OWNER:
-        minimum = max(minimum, 20)
     x, y = _find(schema, x_id), _find(schema, y_id)
     if allowed is not None and x and y and not (
             x["question"] in allowed and y["question"] in allowed):
@@ -306,8 +306,24 @@ def associate(schema: dict, responses: list, x_id: str, y_id: str,
     return _with_caveats(out)
 
 
+def _stars(p) -> str:
+    """The conventional asterisks. A shorthand for a threshold somebody chose,
+    not a measure of anything: they are here because everyone reads them, and
+    the modal beside them says what they are worth."""
+    if p is None:
+        return ""
+    if p < 0.001:
+        return "***"
+    if p < 0.01:
+        return "**"
+    if p < 0.05:
+        return "*"
+    return ""
+
+
 def _with_caveats(out: dict) -> dict:
     """The warnings that belong to every result, rather than to some of them."""
+    out["stars"] = _stars(out.get("p"))
     out["caveats"].append({"kind": "exploratory"})
     if out.get("p") is not None and out["p"] < 0.05:
         out["caveats"].append({"kind": "multiple"})

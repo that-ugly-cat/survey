@@ -94,6 +94,7 @@ STRINGS = {
                                "together. They get the test and the effect size; cells "
                                "under five people stay hidden, and twenty people must "
                                "have answered both before anything is shown.",
+        "explore_how": "How to read this", "explore_back": "back",
         "everyone": "everyone", "by": "by",
     },
     "it": {
@@ -167,6 +168,7 @@ STRINGS = {
                                "Ottiene il test e l'ampiezza dell'effetto; le celle sotto "
                                "le cinque persone restano nascoste, e servono venti "
                                "persone che abbiano risposto a entrambe.",
+        "explore_how": "Come si legge", "explore_back": "indietro",
         "everyone": "tutti", "by": "per",
     },
     "de": {
@@ -237,6 +239,7 @@ STRINGS = {
                                "zusammenhängen. Test und Effektstärke ja, Zellen unter "
                                "fünf Personen nein, und erst wenn zwanzig Personen beide "
                                "beantwortet haben.",
+        "explore_how": "Wie man das liest", "explore_back": "zurück",
         "everyone": "alle", "by": "nach",
     },
     "fr": {
@@ -306,6 +309,7 @@ STRINGS = {
                                "ensemble. Le test et la taille d'effet oui, les cellules "
                                "de moins de cinq personnes non, et vingt personnes "
                                "doivent avoir répondu aux deux.",
+        "explore_how": "Comment lire ceci", "explore_back": "retour",
         "everyone": "tout le monde", "by": "par",
     },
 }
@@ -782,3 +786,229 @@ def build(schema: dict, pools, report: dict, responses: list, viewer: str,
         out.append(entry)
 
     return {"blocks": out, "responses": summary["responses"]}
+
+
+# What the "?" buttons open. Kept apart from STRINGS because these are
+# paragraphs rather than labels, and because they carry the one thing a panel
+# like this owes the person using it: why this test and not the familiar one.
+#
+# Written in English and Italian. A locale with no entry falls back to English
+# per topic, which for several hundred words of statistical prose is a better
+# outcome than a translation nobody checked.
+HELP = {
+    "en": {
+        "how": {
+            "title": "How to read what comes back",
+            "body": [
+                "**The p-value** is how often a pattern at least this strong would turn "
+                "up if the two questions had nothing to do with each other. It is not "
+                "the probability that there is something there, and it says nothing "
+                "about how big the something is.",
+                "**The asterisks** are the usual convention — * under 0.05, ** under "
+                "0.01, *** under 0.001 — and they are a shorthand for thresholds "
+                "somebody chose in 1925, not a measure of importance. Trying many "
+                "pairs produces them at a steady rate with nothing behind them.",
+                "**The effect size** is the one to read first. It says how strongly the "
+                "two move together, and it does not grow just because more people "
+                "answered. A large effect on few people and a tiny effect on many can "
+                "carry the same p-value, and they mean very different things.",
+                "**Moving together is not causing.** If two answers line up, it may be "
+                "that one drives the other, that the other drives the one, that "
+                "something absent from the questionnaire drives both, or that the "
+                "people who chose to answer are not the people you meant to ask. "
+                "Nothing here can tell those apart, and a survey rarely can at all.",
+            ],
+        },
+        "spearman": {
+            "title": "Spearman rank correlation",
+            "body": [
+                "Both answers are turned into ranks — first, second, third — and the "
+                "correlation is computed on those. It asks whether one rises as the "
+                "other rises, in any steady way.",
+                "**Why not Pearson.** Pearson assumes the numbers sit on a scale where "
+                "the distance between them means something, and behaves best when the "
+                "relation is a straight line and the spread is roughly normal. A 1–5 "
+                "rating is ordered, but nobody can say that the step from 4 to 5 is the "
+                "same size as the step from 1 to 2, and with a few dozen answers there "
+                "is no way to check the rest of it either.",
+                "**What it costs.** Working on ranks throws away the size of the gaps, "
+                "so a relation can be perfect here and curved in the data. And rho "
+                "answers about order only: it will not notice a pattern that goes up "
+                "and then down again.",
+            ],
+        },
+        "mannwhitney": {
+            "title": "Mann-Whitney U",
+            "body": [
+                "Two groups, one set of answers. Every answer is ranked against every "
+                "other, and U counts how often a value from one group sits above a "
+                "value from the other.",
+                "**Why not a t-test.** A t-test compares means and leans on each group "
+                "being roughly normal. Ratings are bounded at both ends, lumpy, and "
+                "usually piled up near one end; with twenty or thirty people you cannot "
+                "test that assumption well enough to rely on it. Ranks need none of it.",
+                "**What it costs.** The question it answers is not \"are the means "
+                "different\" but \"does one group tend to sit above the other\". If the "
+                "two groups have very different spreads, it can react to that instead "
+                "of to the shift you had in mind. The medians beside the result are "
+                "there for that reason.",
+            ],
+        },
+        "kruskal": {
+            "title": "Kruskal-Wallis H",
+            "body": [
+                "Mann-Whitney with more than two groups: the same ranking, spread over "
+                "three or more, asking whether they all come from the same place.",
+                "**Why not ANOVA.** One-way ANOVA assumes normal groups with similar "
+                "variances and compares means; the same objections apply as for the "
+                "t-test, and more sharply with small groups.",
+                "**What it costs.** A small p says at least one group differs from the "
+                "others — not which one. Finding out which means comparing pairs, and "
+                "each comparison is another chance for something to look real by "
+                "accident, so this panel does not offer them.",
+            ],
+        },
+        "chi2": {
+            "title": "Chi-square of independence",
+            "body": [
+                "The counts in the table are compared with the counts you would expect "
+                "if the two questions were unrelated. The further the table sits from "
+                "that, the larger the statistic.",
+                "**What it assumes.** That the expected counts are not tiny. Below "
+                "about five in a cell the approximation starts to drift, and with a "
+                "small survey and a question with many options that happens easily — "
+                "which is why the panel counts those cells and tells you.",
+                "**What it costs.** It says the two are not independent and nothing "
+                "about how, or how much. That is what Cramér's V beside it is for, and "
+                "why the table is printed underneath: the shape of the association is "
+                "in the cells, not in the p-value.",
+            ],
+        },
+        "fisher": {
+            "title": "Fisher exact test",
+            "body": [
+                "On a two-by-two table the exact probability of every table with the "
+                "same row and column totals can simply be added up, and the p-value is "
+                "the share of them at least as lopsided as the one observed.",
+                "**Why it is used here.** No approximation, so nothing to be wrong "
+                "about when the counts are small — exactly the case where chi-square "
+                "becomes unreliable. On a 2×2 it costs nothing to compute, so the panel "
+                "always prefers it.",
+                "**What it costs.** It fixes the margins of the table as given, which "
+                "is a stricter model of the sampling than most surveys actually follow, "
+                "and it tends to be a little conservative as a result.",
+            ],
+        },
+    },
+    "it": {
+        "how": {
+            "title": "Come si legge quello che torna",
+            "body": [
+                "**Il p** dice quanto spesso comparirebbe una regolarità forte almeno "
+                "così, se fra le due domande non ci fosse niente. Non è la probabilità "
+                "che qualcosa ci sia, e non dice niente su quanto sia grande.",
+                "**Gli asterischi** sono la convenzione di sempre — * sotto 0,05, ** "
+                "sotto 0,01, *** sotto 0,001 — e sono l'abbreviazione di soglie che "
+                "qualcuno ha scelto nel 1925, non una misura di importanza. Provando "
+                "molte coppie compaiono a ritmo regolare senza niente dietro.",
+                "**L'ampiezza dell'effetto** è quella da leggere per prima. Dice quanto "
+                "forte le due cose si muovono insieme, e non cresce solo perché hanno "
+                "risposto in più. Un effetto grande su poche persone e un effetto minimo "
+                "su molte possono avere lo stesso p, e vogliono dire cose molto diverse.",
+                "**Muoversi insieme non è causare.** Se due risposte si accordano, può "
+                "darsi che una tiri l'altra, che sia il contrario, che qualcosa che nel "
+                "questionario non c'è tiri entrambe, o che chi ha scelto di rispondere "
+                "non sia chi volevi interrogare. Niente qui dentro sa distinguere questi "
+                "casi, e una survey raramente ci riesce del tutto.",
+            ],
+        },
+        "spearman": {
+            "title": "Correlazione di Spearman sui ranghi",
+            "body": [
+                "Le due risposte vengono trasformate in ranghi — primo, secondo, terzo — "
+                "e la correlazione si calcola su quelli. Chiede se una sale mentre "
+                "l'altra sale, in un modo qualunque purché costante.",
+                "**Perché non Pearson.** Pearson assume che i numeri stiano su una scala "
+                "dove la distanza fra loro significhi qualcosa, e dà il meglio quando la "
+                "relazione è una retta e la dispersione è grossomodo normale. Una scala "
+                "1–5 è ordinata, ma nessuno può dire che il passo da 4 a 5 sia lungo "
+                "quanto quello da 1 a 2, e con qualche decina di risposte non c'è modo "
+                "di verificare nemmeno il resto.",
+                "**Cosa costa.** Lavorare sui ranghi butta via l'ampiezza dei salti, "
+                "quindi una relazione può essere perfetta qui ed essere curva nei dati. "
+                "E rho risponde solo sull'ordine: non si accorge di un andamento che "
+                "prima sale e poi torna giù.",
+            ],
+        },
+        "mannwhitney": {
+            "title": "U di Mann-Whitney",
+            "body": [
+                "Due gruppi, un insieme di risposte. Ogni risposta viene messa in rango "
+                "contro tutte le altre, e U conta quante volte un valore di un gruppo "
+                "sta sopra un valore dell'altro.",
+                "**Perché non il test t.** Il t confronta medie e si appoggia sul fatto "
+                "che ciascun gruppo sia grossomodo normale. Le scale di valutazione sono "
+                "limitate ai due estremi, a gradini, e di solito ammassate verso un lato; "
+                "con venti o trenta persone quell'assunzione non la puoi verificare "
+                "abbastanza bene da fidartene. Ai ranghi non serve.",
+                "**Cosa costa.** La domanda a cui risponde non è «le medie sono diverse» "
+                "ma «un gruppo tende a stare sopra l'altro». Se i due gruppi hanno "
+                "dispersioni molto diverse, può reagire a quello invece che allo "
+                "spostamento che avevi in mente. Le mediane accanto al risultato sono lì "
+                "per questo.",
+            ],
+        },
+        "kruskal": {
+            "title": "H di Kruskal-Wallis",
+            "body": [
+                "Mann-Whitney con più di due gruppi: la stessa messa in rango, distesa "
+                "su tre o più, a chiedere se vengono tutti dallo stesso posto.",
+                "**Perché non l'ANOVA.** L'analisi della varianza a una via assume gruppi "
+                "normali con varianze simili e confronta medie; valgono le stesse "
+                "obiezioni del test t, e più forti quando i gruppi sono piccoli.",
+                "**Cosa costa.** Un p piccolo dice che almeno un gruppo si discosta "
+                "dagli altri, non quale. Scoprirlo vuol dire confrontare le coppie, e "
+                "ogni confronto è un'altra occasione perché qualcosa sembri vero per "
+                "caso: per questo il pannello non li offre.",
+            ],
+        },
+        "chi2": {
+            "title": "Chi quadro di indipendenza",
+            "body": [
+                "I conteggi della tabella vengono confrontati con quelli che ti "
+                "aspetteresti se le due domande non c'entrassero niente l'una con "
+                "l'altra. Più la tabella è lontana da lì, più la statistica è grande.",
+                "**Cosa assume.** Che i conteggi attesi non siano minuscoli. Sotto il "
+                "cinque per cella l'approssimazione comincia a scivolare, e con una "
+                "survey piccola e una domanda con molte opzioni capita facilmente — per "
+                "questo il pannello quelle celle le conta e te lo dice.",
+                "**Cosa costa.** Dice che le due non sono indipendenti, e niente su come "
+                "o quanto. A quello servono la V di Cramér accanto e la tabella qui "
+                "sotto: la forma dell'associazione sta nelle celle, non nel p.",
+            ],
+        },
+        "fisher": {
+            "title": "Test esatto di Fisher",
+            "body": [
+                "Su una tabella due per due la probabilità esatta di ogni tabella con "
+                "gli stessi totali di riga e colonna si può semplicemente sommare, e il "
+                "p è la quota di quelle sbilanciate almeno quanto quella osservata.",
+                "**Perché si usa qui.** Nessuna approssimazione, quindi niente che possa "
+                "sbagliare quando i conteggi sono pochi — che è esattamente il caso in "
+                "cui il chi quadro diventa inaffidabile. Su una 2×2 calcolarlo non costa "
+                "niente, quindi il pannello lo preferisce sempre.",
+                "**Cosa costa.** Tratta i margini della tabella come dati, che è un "
+                "modello del campionamento più rigido di quello che le survey seguono "
+                "davvero, e per questo tende a essere un po' conservativo.",
+            ],
+        },
+    },
+}
+
+
+def help_for(locale: str) -> dict:
+    """Help topics in the viewer's language, each falling back to English on
+    its own rather than the whole set at once."""
+    out = dict(HELP["en"])
+    out.update(HELP.get(locale, {}))
+    return out

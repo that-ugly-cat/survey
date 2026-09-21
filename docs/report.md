@@ -263,10 +263,12 @@ more when the people who contributed can turn the data over themselves, so the
 report carries a switch for it, off unless the owner turns it on. What a reader
 gets is the association and not the people behind it: the statistic and the
 effect size are computed on everything, while the cells of any table come back
-masked under the same rule the charts use, the floor rises from ten complete
-pairs to twenty, groups under five are left out, and they may only cross
-questions the report already publishes — crossing two questions is a way of
-reading them, so a question kept back is kept back on both axes.
+masked under the same rule the charts use, groups under five are left out, and
+they may only cross questions the report already publishes — crossing two
+questions is a way of reading them, so a question kept back is kept back on
+both axes. The floor of ten complete pairs is the same for everybody: whether
+a page should be open at all is the decision of whoever runs the study, taken
+once with the switch, and not one to second-guess a second time per request.
 
 With the switch off the route is not there at all, the button is not rendered
 and its script is not sent. The reason to open this door for a bird count is
@@ -277,3 +279,17 @@ No scipy: `stats.py` carries the two special functions the tails need, and
 `test_stats.py` pins them to published critical points. Writing one's own
 distributions is a way to be quietly wrong, and checking them against
 themselves would not catch it.
+
+Every result carries the conventional asterisks beside its p, because everyone
+reads them, and a **?** beside them opens a page saying what they are worth: a
+p-value is not the probability that something is there, the effect size is the
+number to read first, and two answers moving together can be one causing the
+other, the reverse, a third thing causing both, or an artefact of who chose to
+answer. A second **?** beside the test name explains that test and, more to the
+point, why it is the rank-based one — what a t-test or Pearson would have
+assumed about a five-point scale, and what working on ranks costs in exchange.
+
+Those explanations are written in English and Italian; a locale without them
+falls back per topic. Several hundred words of statistical prose translated
+without anybody checking would be worse than a visible fallback, and this is
+the one place in the app where that trade is worth making.

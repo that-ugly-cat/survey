@@ -129,6 +129,21 @@
       margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid #edf2f7;
     }
     .verdict .headline { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+    .verdict .stars { color: #2b4a73; margin-left: 0.3rem; letter-spacing: 0.08em; }
+    .qmark {
+      background: none; border: 1px solid #cbd5e0; border-radius: 99px;
+      color: #718096; font-size: 0.68rem; font-weight: 700; cursor: pointer;
+      width: 1.15rem; height: 1.15rem; line-height: 1; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      vertical-align: middle;
+    }
+    .qmark:hover { border-color: #2b4a73; color: #2b4a73; }
+    .help h3 { font-size: 1rem; margin-bottom: 0.7rem; }
+    .help p { font-size: 0.86rem; line-height: 1.7; margin-bottom: 0.8rem; color: #2d3748; }
+    .help .back {
+      background: none; border: none; color: #4a6fa5; font-size: 0.8rem;
+      font-weight: 600; cursor: pointer; padding: 0; margin-bottom: 0.9rem;
+    }
     .verdict .sub { font-size: 0.82rem; color: #718096; margin-top: 0.2rem; }
     .verdict table { margin-top: 0.9rem; }
     .verdict .caveat {
@@ -273,7 +288,9 @@
   <div class="sheet" id="sheet" onclick="if (event.target === this) closeSheet()">
     <div class="sheet-inner">
       <button class="sheet-close" onclick="closeSheet()">✕</button>
-      <h2>{{ t.explore_title }}</h2>
+      <h2>{{ t.explore_title }}
+        <button class="qmark" onclick="showHelp('how')" title="{{ t.explore_how }}">?</button>
+      </h2>
       <p class="lede">{{ t.explore_lede }}</p>
       <label for="var-x">{{ t.explore_x }}</label>
       <select id="var-x">
@@ -285,6 +302,7 @@
       </select>
       <button class="go" id="go" onclick="runPair()">{{ t.explore_run }}</button>
       <div class="verdict" id="verdict"></div>
+      <div class="help" id="help" style="display:none"></div>
     </div>
   </div>
   {% endif %}
@@ -412,7 +430,31 @@
     const SLUG = {{ slug | tojson }};
     const EXPLORE_URL = {{ explore_url | tojson }};
     const EXPLORE_PAIRS = {{ explore_pairs | tojson }};
+    const HELP = {{ explore_help | tojson }};
     const T = {{ t | tojson }};
+
+    // Bold and italics only: these are our own paragraphs, not anybody's input.
+    function inlineMd(text) {
+      return text.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+                 .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+    }
+
+    function showHelp(topic) {
+      const item = HELP[topic];
+      if (!item) return;
+      const box = document.getElementById("help");
+      box.innerHTML = '<button class="back" onclick="hideHelp()">&larr; '
+        + T.explore_back + "</button><h3>" + item.title + "</h3>"
+        + item.body.map(function (p) { return "<p>" + inlineMd(p) + "</p>"; }).join("");
+      box.style.display = "block";
+      document.getElementById("verdict").style.display = "none";
+      box.scrollIntoView({ block: "nearest" });
+    }
+
+    function hideHelp() {
+      document.getElementById("help").style.display = "none";
+      document.getElementById("verdict").style.display = "block";
+    }
 
     function openSheet() { document.getElementById("sheet").classList.add("open"); }
     function closeSheet() { document.getElementById("sheet").classList.remove("open"); }
@@ -453,6 +495,7 @@
       const btn = document.getElementById("go");
       btn.disabled = true;
       box.innerHTML = "";
+      hideHelp();
       try {
         const r = await fetch(EXPLORE_URL + "?x=" + encodeURIComponent(x)
                               + "&y=" + encodeURIComponent(y)
@@ -467,9 +510,13 @@
                 : (data.p < 0.001 ? "p < 0.001" : "p = " + data.p.toFixed(3));
         const eff = T["e_" + data.effect.name] + " " + data.effect.value
                   + " (" + T["b_" + data.effect.band] + ")";
-        let html = '<div class="headline">' + p + "</div>"
+        const stars = data.stars
+          ? '<span class="stars">' + data.stars + "</span>" : "";
+        let html = '<div class="headline">' + p + stars + "</div>"
                  + '<div class="sub">' + T.lbl_effect + ": " + eff
                  + " · " + T.lbl_test + ": " + T["t_" + data.test]
+                 + ' <button class="qmark" onclick="showHelp(\'' + data.test
+                 + '\')">?</button>'
                  + " · " + data.n + " " + T.lbl_answered_both + "</div>"
                  + verdictTable(data);
         (data.caveats || []).forEach(function (c) {

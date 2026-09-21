@@ -1202,6 +1202,7 @@ def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
         "owner": viewer == aggregate.OWNER,
         "as_who": None,
         "explore_vars": _explore_vars(schema, stored, viewer, locale),
+        "explore_help": results_view.help_for(locale),
         "explore_pairs": explore.pair_count(schema),
         "explore_url": (f"/admin/surveys/{slug}/explore.json"
                         if viewer == aggregate.OWNER

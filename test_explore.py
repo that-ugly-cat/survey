@@ -116,6 +116,30 @@ flat = [{"gruppo": "a", "voto": 3} for _ in range(20)]
 ok(explore.associate(SCHEMA, flat, "gruppo", "voto", "it")["error"] == "no_variation",
    "a variable that never varies has nothing to compare")
 
+print("\n--- the asterisks, and what they are worth ---")
+import results as RS
+show("stars", {round(p, 4): explore._stars(p)
+               for p in (0.0001, 0.005, 0.03, 0.2)})
+ok(explore._stars(0.0001) == "***" and explore._stars(0.005) == "**"
+   and explore._stars(0.03) == "*" and explore._stars(0.2) == "",
+   "the usual three thresholds, and nothing above the top one")
+ok(explore._stars(None) == "", "and nothing at all when there is no p")
+ok(perfect["stars"] == "***", "they travel with the result")
+
+topics = RS.help_for("it")
+ok(set(topics) >= {"how", "spearman", "mannwhitney", "kruskal", "chi2", "fisher"},
+   "there is an explanation for how to read a result and for every test offered")
+ok(all(t["test"] in topics for t in
+       [{"test": k} for k in ("spearman", "mannwhitney", "kruskal", "chi2", "fisher")]),
+   "each test name matches the topic the panel will ask for")
+ok("causa" in " ".join(topics["how"]["body"]).lower(),
+   "the reading guide says that moving together is not causing")
+ok("Pearson" in " ".join(topics["spearman"]["body"])
+   and "t" in " ".join(topics["mannwhitney"]["body"]),
+   "and each test says which familiar one it is standing in for")
+ok(RS.help_for("de")["chi2"]["title"].startswith("Chi-square"),
+   "a language with no translation falls back per topic rather than breaking")
+
 print("\n--- the caveats travel with the answer ---")
 kinds = [c["kind"] for c in perfect["caveats"]]
 show("caveats", kinds)
@@ -251,11 +275,12 @@ with TestClient(main.app) as client:
                    (sid, json.dumps(t)))
     db.commit(); db.close()
     main._invalidate_results(sid)
-    ok(client.get(pub_url).json().get("error") == "too_few",
-       "fifteen is enough for the owner and not for a reader: the floor is twenty")
-    ok(not client.get("/admin/surveys/demo/explore.json?x=gruppo&y=eco",
-                      cookies=owner_cookie).json().get("error"),
-       "and the owner is not held to it")
+    # The floor is the same for everybody. Whether a page should be open at
+    # all is the decision of whoever runs the study, taken once with the
+    # switch, and not something to second-guess a second time per request.
+    ok(not client.get(pub_url).json().get("error"),
+       "fifteen is enough for a reader too: the floor does not move with the audience")
+    ok(client.get(pub_url).json()["n"] == 15, "and it is the same fifteen pairs")
 
     db = main.get_db()
     db.execute("DELETE FROM responses WHERE survey_id=?", (sid,))
