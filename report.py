@@ -145,9 +145,19 @@ def question_names(schema: dict) -> list:
 def locales(schema: dict) -> list:
     """The locales a text block should offer: those the questionnaire already
     speaks. A results page in one language under a questionnaire in two is a
-    page that half the respondents cannot read."""
+    page that half the respondents cannot read.
+
+    A questionnaire written in one language has no locale objects to scan, so
+    there is nothing to find and the page would default to English over Italian
+    questions. SurveyJS lets a schema declare its own `locale`, and that
+    declaration is taken at its word when there is nothing else to go on.
+    """
     found = locales_in(schema)
-    return [l for l in LANGS if l in found] or ["en"]
+    spoken = [l for l in LANGS if l in found]
+    if spoken:
+        return spoken
+    declared = str(schema.get("locale") or "").strip().lower()
+    return [declared] if declared in LANGS else ["en"]
 
 
 def effective_audience(report: dict, block: dict) -> str:

@@ -128,6 +128,11 @@ ok(any(x["kind"] == "nothing_published" for x in f),
    "a shared report whose every block is private says so, instead of serving an empty page")
 
 ok(R.locales(SCHEMA) == ["en", "it"], "text blocks are offered the languages the survey speaks")
+ok(R.locales({"locale": "it", "pages": [{"name": "p", "elements": [
+    {"type": "text", "name": "q", "title": "Quanti anni hai?"}]}]}) == ["it"],
+   "a questionnaire written in one language is taken at its declared word, "
+   "instead of defaulting to English over Italian questions")
+ok(R.locales({"pages": []}) == ["en"], "and with nothing to go on, English")
 
 # --- routes ---
 
