@@ -1,19 +1,20 @@
 # Survey — User Guide
 
-Survey is a self-hosted questionnaire platform for academic studies: you write the questionnaire as a JSON schema, share one public link, and download the responses as CSV, Excel or JSON. It runs on the institute's own machine, so no respondent data passes through a commercial survey service. It is built for experimental designs — balanced randomization, condition variables, counterbalanced presentation order — and it does nothing about analysis, which stays where you already do it.
+Survey is a self-hosted questionnaire platform for academic studies: you write the questionnaire as a JSON schema, share one public link, and download the responses as CSV, Excel or JSON. It runs on a server in Switzerland that the research group operates itself, so no respondent data passes through a commercial survey service. It is built for experimental designs — balanced randomization, condition variables, counterbalanced presentation order. It can also show what came back: a results page you compose, for yourself, for your respondents or for anyone with the link, with small groups masked before they leave your view (§9). Inference stays where you already do it.
 
 ---
 
 ## 1. Getting in
 
-Two doors stand between you and the dashboard, and they are not the same door.
+On survey.borant.eu you sign in once, at **Borant ID**, the shared sign-in for the borant.eu tools. Ask Spit for an account there. Survey's own login, registration and two-factor pages are switched off behind it, so there is one password and one authenticator, not two. Your Survey profile is created the first time the gate lets you through.
 
-1. **Borant ID** is the shared sign-in for the borant.eu tools. Reaching the researcher side of Survey needs an account there; ask Spit for one. Respondents never meet it: the questionnaire at `/s/{slug}`, its submit route and the uploaded files stay open, because a participant has no account here and must not be asked for one.
-2. **The Survey account** itself. Register with your name, email and a password of at least eight characters. If your institutional sign-in took you straight to the dashboard and no password was asked, your account is already linked — go to §2.
+**Two-factor authentication is mandatory, and enforced by the gate.** Survey is the one tool in the borant.eu family where the gate asks for the second factor on everything it guards, from the landing page down, not only on the admin pages. Enrol an authenticator app (Ente Auth, Google Authenticator, Aegis) in Borant ID and keep its backup codes: each works once, and they are the way back if you lose the device. If you are locked out, Spit can reset the second factor there.
 
-**Two-factor authentication is mandatory.** A fresh account gets a session that lasts ten minutes and cannot reach the dashboard until you enrol: scan the QR code with an authenticator app (Ente Auth, Google Authenticator, Aegis), confirm the six-digit code, and save the **ten backup codes** you are then shown — each works once, and they are the only way back if you lose the device. Every later sign-in asks for the current code. You can regenerate the backup codes from **Profile**; an administrator can reset your 2FA if you are locked out, and can also disable an account or issue a temporary password.
+The reason is what sits behind the door: respondent data, in the exports and in the dashboard that lists them. Other tools let a password do. This one does not.
 
-The reason 2FA survived the move behind the shared gate, when other tools dropped theirs, is what the exports contain: respondent data. The dashboard that lists them is respondent data too.
+**Respondents never meet any of this.** The questionnaire at `/s/{slug}`, its submit route, published results pages, uploaded files and the platform's own scripts stay outside the gate, because a participant has no account here and must not be asked for one.
+
+*Running your own copy.* Without a gate in front (`AUTH_MODE=local`, the default for a fresh install), Survey does all of this itself: open registration with a password of at least eight characters, a ten-minute session that cannot reach the dashboard until you enrol in TOTP, ten single-use backup codes shown once and regenerable from **Profile**, and an administrator page that can reset a user's second factor, disable an account or issue a temporary password. `DEPLOY.md` covers both modes.
 
 **Your surveys are yours.** Every route under `/admin/surveys/...` filters by ownership — you see the surveys you created, an administrator sees all of them, and nothing is shared between accounts. A survey belonging to someone else answers "not found" rather than "forbidden", so no one can enumerate what they cannot read.
 
@@ -23,7 +24,7 @@ A survey is three things: a **title**, a **slug** (the URL segment: `/s/pgt-gge-
 
 You do not build the schema here. Use the free **SurveyJS editor** (the *Build survey* button on the dashboard links to it), then either upload the `.json` file or paste the JSON into the form. The only check at this point is that the JSON parses; everything else is checked later, by you (§4).
 
-Three things can go wrong at creation and all three say so: no schema supplied, JSON that does not parse, and a slug already in use. Editing later works the same way — **Edit schema** shows the stored JSON, formatted, and takes a replacement by upload or by typing. The title can change; the slug cannot. When the survey already holds responses the form says so and **refuses the save** until you tick the box that states the consequence: those answers were given to the wording stored now, and no backup restores the wording a respondent read (§11 says why it matters). Confirming is recorded in the application log, which is the only place it is recorded — nothing in the export says the instrument moved. The chat surface applies the same rule, where it is called `force` (§9).
+Three things can go wrong at creation and all three say so: no schema supplied, JSON that does not parse, and a slug already in use. Editing later works the same way — **Edit schema** shows the stored JSON, formatted, and takes a replacement by upload or by typing. The title can change; the slug cannot. When the survey already holds responses the form says so and **refuses the save** until you tick the box that states the consequence: those answers were given to the wording stored now, and no backup restores the wording a respondent read (§12 says why it matters). Confirming is recorded in the application log, which is the only place it is recorded — nothing in the export says the instrument moved. The chat surface applies the same rule, where it is called `force` (§10).
 
 New surveys created from the dashboard are **open** immediately. Close one with **Close** and it shows a "not available" page instead of the questionnaire, and its submit route refuses too — so closing is a real gate on the data, not just on the front page. Use it while you are still building.
 
@@ -64,7 +65,7 @@ Any other type still renders for the participant, but comes out of the review do
 
 **Walk it yourself** by opening `/s/{slug}`. This is the honest test of appearance, and it is also its limit: one arm at a time, whichever arm you happen to be assigned, and it costs you a response in your own data. Purge before fielding (§8).
 
-**Validation and arm preview** are on the chat surface (§9), not in the web pages, because both are things you ask while you are editing rather than things you read on a screen. `validate_survey` reports duplicate question names, conditions reading a field nothing defines, conditions reading an answer given on a *later* page (which can never be true when the question is shown), placeholder choice values like `Item 1` that make an export unreadable, pool pages that do not exist in the schema, and arms that reach no questions at all. `preview_flow` reports, for every arm at once, the pages in the order shown and the questions on each.
+**Validation and arm preview** are on the chat surface (§10), not in the web pages, because both are things you ask while you are editing rather than things you read on a screen. `validate_survey` reports duplicate question names, conditions reading a field nothing defines, conditions reading an answer given on a *later* page (which can never be true when the question is shown), placeholder choice values like `Item 1` that make an export unreadable, pool pages that do not exist in the schema, and arms that reach no questions at all. `preview_flow` reports, for every arm at once, the pages in the order shown and the questions on each.
 
 Both read the schema, and the schema cannot know everything: `{condition} = 'C'` is decidable before anyone opens the survey, `{pgt_q2} >= 2` is not. A question whose visibility depends on an answer comes back marked **conditional, with the expression that governs it**, rather than guessed at — you can pin known answers to see what they open. The expression reader covers `=`, `<>`, `>`, `>=`, `<`, `<=`, `contains`, `notcontains`, `anyof`, `allof`, `empty`, `notempty`, `and`, `or`, `not` and parentheses; anything outside that subset is reported as undecidable or unparseable instead of being assumed true.
 
@@ -103,6 +104,8 @@ With panel mode on, anyone arriving without a valid token is stopped before the 
 
 One page at a time, with a progress bar, in the language the bar offers. Pool pages that were not drawn are hidden before the model is built, so the participant never sees a gap.
 
+**A link in the header, *How this platform works*, opens a notice** in the participant's language: who runs the platform, what is recorded alongside the answers, who sees what, that the page sets no cookies and loads nothing from another site, and that an anonymous response cannot be found again to be deleted. It explains the tool, not the study: purpose, legal basis, retention and ethics approval are yours to state in your own participant information, and the notice tells the reader so. Read it once before fielding, because your information sheet should not contradict it.
+
 **Nothing is stored until the participant reaches the end and submits.** There is no save-and-resume, no partial responses, and no way back into a submitted response to correct it. An abandoned session leaves no row in your data — only, for up to an hour, a pending assignment in the balance counters. Plan the questionnaire's length accordingly: a break-off at question forty costs you all forty answers.
 
 **Timing is recorded**: total seconds, and seconds per page keyed by page name, measured in the browser from when the page appears. Only pages the participant actually reached get an entry. It measures a page being open, which is not the same as attention, so treat it as a screening variable for implausibly fast completions rather than as a measure of anything.
@@ -133,39 +136,93 @@ Older surveys, configured before pools could name their own variable, carry `_co
 
 **Purge answers** (danger zone) empties a survey of its responses and of the randomization balance that goes with them, keeping the questionnaire, its files and its pool configuration. The balance goes because leaving it would count arms as completed by respondents who no longer exist. This is the button for clearing your own test run before fielding. **Delete survey** removes everything, including the uploaded files. Neither can be undone, and the dashboard list offers an inline delete only for surveys at zero responses.
 
-There is no analysis in Survey — no crosstabs, no charts, no significance tests. The export is the handover point.
+The export is the handover point for analysis. What Survey adds on top of it, in §9, is for watching the data arrive and for showing it, not for writing it up.
 
-## 9. Driving it from a chat
+## 9. Showing the results
+
+A **report** is a results page for one survey: an ordered list of blocks, each either text you write or a chart of one question's answers, served live to up to three audiences. Open the editor from the manage page with **Results report**. One survey has one report.
+
+**Blocks.** Three kinds:
+
+- **Text** — markdown, one version per language of the questionnaire. A language you leave empty falls back to English. Raw HTML is not rendered.
+- **Question** — one question by name, with its chart, counts or percentages, schema or frequency order, and whether an *Other* option is shown.
+- **All questions** — every question in schema order, resolved each time the page is built, so a question added next week appears by itself. **+ All questions** is the one-click start; **Explode into separate blocks** turns it into one block per question, which is how customising starts.
+
+Blocks reorder by dragging or with the arrow buttons. A block naming a question the schema no longer has stays on the page and says it is orphaned, rather than vanishing.
+
+**What a chart shows.** Each question type gets the chart its shape allows: bars for single and multiple choice, a distribution with mean, median and SD for ratings and numbers, a stacked bar per row for matrices, positions for rankings, a timeline for dates. Every question shows **n** (answered) and **missing** (shown it, did not answer), because branching and randomization make those differ from question to question. Multiple-choice percentages are of respondents, not of selections. Every chart has a table underneath, which is also what the page shows with JavaScript off.
+
+**Audiences.** The report has a ceiling, and each block can travel less far than the report does:
+
+| | Owner (you) | Respondents | Anyone with the link |
+|---|---|---|---|
+| Closed-choice questions | all | the blocks you allow | the blocks you allow |
+| Open text answers | yes | **no** | **never** |
+| Split by randomization arm | yes | no | no |
+| n and missing | yes | yes | yes |
+| Their own answers marked | — | yes | — |
+| Cells with fewer than 5 people | shown | masked | masked |
+
+Open text is refused at every level but yours, whatever a block asks for: the sentence somebody typed into a comment box was not written for a public page. The split by arm stays with you because it is the experimental manipulation, and nobody's business before the study is written up.
+
+**Masking.** Below five people a cell is hidden from respondents and the public, and a question with fewer than five answers in total says *not enough responses yet*. Hiding one cell would hide nothing, since the total is published and a subtraction gives it back, so the hidden group grows until it holds at least two cells adding up to five or more. Cells at zero stay visible.
+
+**Where each audience finds it.**
+
+- **You**: **View results** on the manage page (`/admin/surveys/{slug}/results`). **Looking as** *me / a respondent / anyone* rebuilds the page for that audience through exactly the filter they would get, with a banner saying so — the only way to check what a published page exposes without publishing it. Choosing a condition variable beside *everyone* splits every chart by arm.
+- **Respondents**: when the report reaches them, the questionnaire ends with a link to the results, carrying a token minted at submission (`/s/{slug}/results?r=…`). It opens the page with that person's own answers marked. Each link is personal, so there is no respondent link to hand out.
+- **Anyone**: a public report lives at `/s/{slug}/results`. The manage page (under **Share**) and the editor both offer that URL, a QR code and an iframe snippet for `/s/{slug}/results/embed`, the same page without its frame. A report that does not reach the public answers "not found", exactly like a survey that does not exist.
+
+The numbers are live: the page re-reads them every thirty seconds and stamps the time. The page's own words come in all four languages, with a switcher on every results page, and question labels follow the schema.
+
+**Publishing while the survey is still open** is allowed, and the editor says what it costs at the moment you choose it: whoever reads the results before answering is anchored by them. Publishing is recorded in the application log.
+
+**Exploring two questions.** On your own results page, a floating button opens a panel that takes two questions and says whether they move together. The test is chosen from the shapes of the two variables, and it is always rank-based: Spearman for two rankable variables, Mann-Whitney or Kruskal-Wallis for a category against a rankable one, Fisher's exact test or chi-square for two categories. A checkbox question counts as one yes/no per option. Every result carries an effect size beside its p, the number of people who answered both, and its caveats; when p falls under 0.05 it also says how many pairs this questionnaire offers, because trying them all yields one in twenty by chance alone. Fewer than ten complete pairs is refused. The **?** beside the asterisks and beside the test name explain what each is worth. This is for looking, not for a results section.
+
+**Letting readers explore.** Once the report reaches respondents or the public, the editor offers a switch, off by default, that gives readers the same panel. They get the statistic and the effect size, never the people behind them: table cells are masked under the same rule as the charts, groups under five are dropped, and they can only cross questions the report already shows them. With the switch off the panel does not exist on their page at all. This makes sense for a citizen-science page and not for a study about abuse, which is why it is a decision and not a default. Turning it on is logged.
+
+There are no cross-tabs to export, no word clouds and no figure export for papers. Open answers belong in a qualitative coding tool, and inference in R.
+
+## 10. Driving it from a chat
 
 If you work with an AI assistant, Survey can be plugged into it. The point is not saving clicks: editing a questionnaire raises the same three questions every time — what does it look like now, what would a participant in each arm actually walk through, and what did the last change break — and the web pages answer only the first.
 
 **Getting a key.** On the dashboard, under **MCP key**, create one. Paste `https://survey.borant.eu/mcp` and the key into your client's MCP settings as an `X-API-Key` header; clients that cannot set headers can use `https://survey.borant.eu/mcp/k/<your-key>` instead, where the key sits in the URL and access logs may keep it. You get one key, and regenerating it replaces it at once, so anything else still configured with the old one stops working.
 
-**What the assistant can do.** List your surveys and read one; read the schema; walk every randomization arm; validate what is broken; read the balance counters, the collected responses with their full payloads, and a summary whose `never_answered` list is the quick way to find a branch nobody reaches. Writing: create a survey, replace its schema, create or replace a pool, reset counters, open or close it.
+**What the assistant can do.** List your surveys and read one; read the schema; walk every randomization arm; validate what is broken; read the balance counters, and a summary of how many responses arrived per arm, how long they took and how often each question was answered, whose `never_answered` list is the quick way to find a branch nobody reaches. On the results side (§9): `question_summary` returns the aggregates a published results page would draw, at the public level, so it doubles as the way to check a page before publishing it; `get_report` and `set_report` read and replace the report. Writing: create a survey, replace its schema, create, replace or delete a pool, reset counters, open or close it, and replace the report.
 
-**Where it refuses.** A schema with structural errors is refused unless you force it. **Editing the schema of a survey that already holds responses is refused unless you force it**, because those answers were given to the other wording and reinterpreting them silently is the one mistake a backup does not undo — and if you do force it, write it down, because nothing in the export records that the instrument moved under the data. Deleting a survey and deleting responses are not exposed at all: they stay in the web pages, where a human is holding the mouse. A new survey is created closed unless you say otherwise, so a half-built questionnaire is not reachable while you finish it.
+**The model never sees your data.** No tool returns a response. The assistant gets no payload, no open answer, no panel token and no answers split by randomization arm, and `question_summary` refuses the owner's view outright: what it hands over is what anyone would see on a public results page, with cells under five people masked and a question under five answers reported only as too small. What it does see is the questionnaire itself and counts — how many responses, how many per arm, how often each question was answered.
 
-**What it cannot do.** Upload files (binary, so the corpus of images arrives through the web pages), set panel recruitment, purge or delete anything, and manage users.
+The reason is where a conversation goes. Whatever an assistant reads travels to the company that runs the model, under that company's terms and not this server's, and usually outside Switzerland. The participant notice (§7) tells people that individual answers are seen only by the people running the study, and the MCP surface is built so that this stays true whoever connects an assistant. Individual responses, open text and the experimental split are read on your results page and in the export, by you.
 
-**What it reaches.** Exactly what you reach. The key carries your identity, so a survey you cannot manage does not exist as far as your assistant is concerned, and disabling an account closes its key with it.
+**Where it refuses.** A schema with structural errors is refused unless you force it. **Editing the schema of a survey that already holds responses is refused unless you force it**, because those answers were given to the other wording and reinterpreting them silently is the one mistake a backup does not undo — and if you do force it, write it down, because nothing in the export records that the instrument moved under the data. Deleting a survey and deleting responses are not exposed at all: they stay in the web pages, where a human is holding the mouse. A new survey is created closed unless you say otherwise, so a half-built questionnaire is not reachable while you finish it. Publishing a report beyond yourself while the survey is still collecting is refused unless the call says `publish_on_open`, for the anchoring reason in §9: the web editor shows a warning, and a tool without a warning box has to refuse instead.
+
+**What it cannot do.** Upload files (binary, so the corpus of images arrives through the web pages), set panel recruitment, purge responses, delete a survey, and manage users.
+
+**What it reaches.** Your surveys and no one else's, and less of them than you do. The key carries your identity, so a survey you cannot manage does not exist as far as your assistant is concerned, and disabling an account closes its key with it. The key does **not** pass through the sign-in gate, because an assistant cannot type a six-digit code: `/mcp` sits outside Borant ID and the key alone opens it. A key is therefore a password with no second factor in front of it. Keep it out of shared configuration files, and regenerate it if it might have leaked.
 
 A whole questionnaire has been built this way — the reusable teaching-evaluation survey, created, revised three times, validated and previewed from a conversation without the admin pages being opened once. It works best where the questionnaire is being *thought out* rather than typed in.
 
-## 10. Data protection
+## 11. Data protection
 
-**A response is anonymous by construction, and that is a claim about this app, not about your study.** What gets stored is the payload the browser sends — your questions' answers plus the keys in §8 — and a server timestamp. No IP address, no user agent, no cookie, no account: a respondent has no identity here to record.
+**A response is anonymous by construction, and that is a claim about this app, not about your study.** What gets stored is the payload the browser sends — your questions' answers plus the keys in §8 — a server timestamp, and a random token that opens the respondent's own results view (§9). No IP address, no user agent, no cookie, no browser storage, no account: a respondent has no identity here to record. Everything the questionnaire loads comes from this server, so answering contacts no third party. The notice behind the questionnaire's header link (§7) tells participants the same, in their language; `test_notice.py` checks those claims against the rendered page, so one that stops being true fails a test instead of staying written.
 
-Three things qualify that:
+Four things qualify that:
 
 - **A panel token is a pseudonymous identifier.** The provider can trace it back to a person. A study recruiting this way has to say so in its ethics application and in its participant information, and cannot describe its responses as carrying no identifying metadata.
 - **Open-ended answers identify people.** A free-text box invites names, places, diagnoses and workplaces, and no setting here can prevent that. Whatever a participant types is what you now hold.
 - **Timing and condition data are still data about a person.** Seconds per page plus a rare demographic combination is a smaller haystack than it looks.
+- **Anonymity cuts both ways.** A participant who changes their mind after submitting cannot be found again by anything stored here. The notice tells them to write to you quickly, with the day and time, so put a contact in your participant information.
 
-Responses live in the platform's database on the institute's server, readable by you and by an administrator, until you purge or delete the survey. Uploaded files are served publicly at a guessable path, so do not put anything there that is not meant for participants' eyes. The MCP key is a second door onto the same responses: an assistant holding one can read them, which means those responses reach whichever model that client talks to — the same judgement, made once for everything you can see, so make it deliberately and revoke the key when the project ends.
+**Who can read the responses.** You, and an administrator of the platform, both through the sign-in gate with a password and a second factor (§1). They stay in the platform's database, on a server in Switzerland run by the research group, until you purge or delete the survey. Uploaded files are served publicly at a guessable path, so do not put anything there that is not meant for participants' eyes.
+
+**What a results page lets out.** Aggregates only, and never open text, at any level but yours. Cells under five people are masked with the complementary rule in §9, and the split by randomization arm stays with you. Two things remain your judgement. Masking protects small cells, not small samples: a public page on a study of twelve people says a great deal about each of them, even with every rule applied. And a respondent's results link marks that person's own answers, so anyone they forward it to sees what they answered. **Looking as** *anyone* before publishing is the check; nothing reaches beyond you until you raise the report's audience.
+
+**The MCP key reaches the questionnaire, not the people.** An assistant holding it can read and change the schema, the pools and the report, and read aggregates at the public level (§10), but never a response, an open answer or a panel token. That is what lets the participant notice say that individual answers stay with the study team without an exception for researchers who use an assistant. It also means a leaked key gives away counts and masked aggregates, not a single response, though it can still damage a questionnaire: it has no second factor in front of it, so keep it out of shared configuration and revoke it when the project ends. If you paste exported responses into a conversation yourself, that is a transfer to the model provider like any other, and your ethics approval and participant information have to cover it.
 
 Compliance with GDPR and the Swiss FADP, your institutional requirements and the conditions of your ethics approval is the researcher's responsibility, not the tool's. When in doubt, ask your data protection officer before fielding, not after.
 
-## 11. Good practices
+## 12. Good practices
 
 - **Changing question wording after responses arrive changes what the data means.** The old rows keep their answers and the new column headers do not describe them; where you add or remove an item, past respondents are absent from it. Freeze the instrument before the first real response, and if you must edit afterwards, treat it as two studies and say so in the write-up.
 - **Name your questions for your analysis**, not for the editor. `pgt_q3` and `consent` survive the export; the SurveyJS builder's default `question1` does not tell you anything six months later. And never leave choice values as `Item 1`: reordering the options then silently changes what past answers mean.
@@ -176,5 +233,7 @@ Compliance with GDPR and the Swiss FADP, your institutional requirements and the
 - **Watch the balance counters mid-field.** *In progress* far above *Completed* means people are opening and leaving, which is a questionnaire problem, not a randomization problem.
 - **Prefer separate rating questions to one big matrix**, unless the items genuinely share a scale. A matrix imposes a single agreement scale on dimensions that do not take it well and pays the price in acquiescence bias; separate `rating` items each carry their own anchors and still arrive numeric in the Excel export.
 - **Keep the questionnaire short enough to finish.** Nothing is saved before submission, so length is paid for in whole responses, not in missing cells.
+- **Publish results after closing, unless the study is about sharing them as they come.** An open survey with a public page anchors everyone who looks before answering. Check the page with **Looking as** *anyone* first, and remember that small samples stay revealing even with every cell above five.
+- **Keep exports out of conversations.** The MCP surface never hands a model your responses; pasting the CSV into a chat undoes that in one move. Work on the export where your analysis already lives.
 - **Close the survey when you are done.** Closing blocks the page and the submit route, so nothing arrives after the cutoff you report.
 - **Survey gives you an instrument and a clean table.** Sampling, recruitment, consent, ethics, weighting and analysis are the human work, and none of them is automated here.

@@ -62,7 +62,8 @@ with TestClient(main.app):
     ok(r.status_code == 200, f"good key -> 200 (got {r.status_code})")
     names = {t["name"] for t in r.json().get("result", {}).get("tools", [])}
     ok({"list_surveys", "preview_flow", "validate_survey", "update_schema",
-        "set_pool", "get_responses"} <= names, f"tools advertised: {len(names)}")
+        "set_pool", "question_summary"} <= names, f"tools advertised: {len(names)}")
+    ok("get_responses" not in names, "no tool hands a model the response payloads")
 
     r = client.post(f"/mcp/k/{key}/", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
                     headers={"Accept": "application/json, text/event-stream"})
@@ -185,9 +186,8 @@ with TestClient(main.app):
     ok(res.get("responses_held") == 1, "force goes through, and says how many were held")
 
     print("\n--- responses ---")
-    res = mcp_app.get_responses("mine")
-    ok(res["total"] == 1 and res["responses"][0]["data"]["q1"] == 4,
-       "responses come back with their full payload")
+    ok(not hasattr(mcp_app, "get_responses"),
+       "the payloads are not reachable from the model side at all")
     stats = mcp_app.response_stats("mine")
     ok(stats["responses"] == 1 and stats["answered"]["q1"] == 1,
        "stats count answers per question")
@@ -227,31 +227,55 @@ with TestClient(main.app):
     db.close()
     main._invalidate_results(sid)
 
+    # An open answer and a panel token, so there is something a leak would carry.
+    OPEN = json.loads(json.dumps(SCHEMA))
+    OPEN["pages"][0]["elements"].append({"type": "comment", "name": "q_open"})
+    ok(mcp_app.update_schema("mine", OPEN, force=True).get("error") is None,
+       "a free-text question added for the leak check")
+    db = main.get_db()
+    db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+               (sid, json.dumps({"consent_agree": ["agree"], "q1": 5,
+                                 "q_open": "my consultant at the Inselspital",
+                                 "_panel_token": "RID-SECRET",
+                                 "_conditions": {"condition": "A"}})))
+    db.commit(); db.close()
+    main._invalidate_results(sid)
+    total += 1
+
     res = mcp_app.question_summary("mine")
     q1 = next(q for q in res["questions"] if q["name"] == "q1")
     print(f"    [q1] exposed={q1['exposed']} n={q1['n']} missing={q1['missing']} "
           f"cells={[(c['value'], c['n']) for c in q1['cells']]}")
-    ok(res["responses"] == total and q1["n"] == 12,
+    ok(res["audience"] == "public", "the default is what a published page would show")
+    ok(res["responses"] == total and q1["n"] == 13,
        "the aggregates come back as numbers")
-    ok(q1["exposed"] == 12 and total == 13,
-       "and the one response that never consented never reached the question")
-    ok(q1["exposed"] == 12 and q1["missing"] == 0,
+    ok(q1["exposed"] == 13 and q1["missing"] == 0,
        "with the three counts kept apart rather than conflated")
+    ok(any(c.get("suppressed") for c in q1["cells"]),
+       "and cells under five masked, as the public would see them")
 
-    pub = mcp_app.question_summary("mine", name="q1", audience="public")
-    print(f"    [q1 public] {[(c['value'], c['n']) for c in pub['questions'][0]['cells']]}")
-    ok(any(c.get("suppressed") for c in pub["questions"][0]["cells"]),
-       "asking as the public shows what the public would be served")
+    import aggregate
+    raw = aggregate.summarise(OPEN, [], [{"consent_agree": ["agree"],
+                                          "q_open": "my consultant at the Inselspital"}])
+    ok("Inselspital" in json.dumps(raw),
+       "the owner-level aggregate does carry the text, so the next check means something")
+    blob = json.dumps(res) + json.dumps(mcp_app.question_summary("mine", name="q_open"))
+    ok("Inselspital" not in blob and "RID-SECRET" not in blob,
+       "no open answer and no panel token in anything returned")
+    ok(not any("groups" in q or "texts" in q for q in res["questions"]),
+       "no split by arm and no text lists")
+
+    res = mcp_app.question_summary("mine", audience="owner")
+    ok(res.get("error") and "not available to a model" in res["error"],
+       "the owner's view is refused, and says why")
+    ok(mcp_app.question_summary("mine", audience="respondent").get("questions"),
+       "the respondent level is allowed")
     ok(mcp_app.question_summary("mine", audience="everybody").get("error"),
        "an audience nobody defined is refused")
     ok(mcp_app.question_summary("mine", name="nope").get("error"),
        "so is a question the schema does not have")
     ok(mcp_app.question_summary("theirs").get("error"),
        "and somebody else's survey stays out of reach")
-
-    split = mcp_app.question_summary("mine", by="condition")
-    got = next(q for q in split["questions"] if q["name"] == "q1")
-    ok(set(got.get("groups", {})) == {"A", "B"}, "by= splits the aggregate per arm")
 
     print("\n--- the report, from the conversation ---")
     ok(mcp_app.get_report("mine")["blocks"] == [], "a survey starts with an empty report")

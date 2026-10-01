@@ -17,6 +17,15 @@ has exactly the reach of its owner. A survey the caller cannot manage reports
 "not found" rather than "forbidden", so the model cannot enumerate what it
 cannot see.
 
+Data. The model never sees a response. No tool returns a payload, an open
+answer or the answers split by randomization arm: what the results surface
+hands over is what a published page would serve, cells under five masked, plus
+the counts the balance needs (how many per arm, how often each question was
+answered). Everything a model reads travels to whoever runs it, under
+their terms and not this server's, and the participant notice tells people that
+individual answers are seen only by the people running the study. The owner has
+the export for the rest, and the export does not go through a conversation.
+
 Writes are guarded rather than free. Editing the schema of a survey that already
 holds responses is refused unless the caller says `force`, because the answers
 already collected were given to the old wording and silently reinterpreting them
@@ -43,15 +52,16 @@ mcp = MCPServer(
     name="survey",
     instructions=(
         "Questionnaires on survey.borant.eu: structure, randomization arms, and "
-        "collected responses. Start with list_surveys. preview_flow answers what "
-        "a participant in each arm walks through, and validate_survey reports what "
-        "is broken — both read the schema, so neither needs the questionnaire to be "
-        "open in a browser. question_summary gives what people answered, with the "
-        "denominators kept apart, and takes an audience so you can see what a "
-        "published results page exposes. Reads are free; confirm with the user "
-        "before any write, and note that saving a pool resets its balance counters, "
-        "and that publishing a report while the survey is still collecting anchors "
-        "whoever reads it before answering."
+        "what came back, in aggregate. Start with list_surveys. preview_flow "
+        "answers what a participant in each arm walks through, and validate_survey "
+        "reports what is broken — both read the schema, so neither needs the "
+        "questionnaire to be open in a browser. question_summary gives what people "
+        "answered as a published results page would show it, masked below five and "
+        "with the denominators kept apart. Individual responses and open answers "
+        "are not reachable from here by design: the export is the owner's. Reads "
+        "are free; confirm with the user before any write, and note that saving a "
+        "pool resets its balance counters, and that publishing a report while the "
+        "survey is still collecting anchors whoever reads it before answering."
     ),
 )
 
@@ -227,36 +237,6 @@ def randomization_status(slug: str) -> dict:
                 "total_completed": sum(completed.values()),
             })
         return {"slug": slug, "pools": out}
-    finally:
-        db.close()
-
-
-@mcp.tool()
-def get_responses(slug: str, limit: int = 50, offset: int = 0) -> dict:
-    """Collected responses, newest first, with their full payloads.
-
-    Each carries the answers plus the platform's own keys: `_conditions` (the
-    randomization arm), `_assignment` (the pool pages drawn) and `_timing` (
-    seconds per page). Responses are anonymous; nothing here identifies a
-    participant.
-    """
-    db = _db()
-    try:
-        row = _owned(db, slug)
-        if not row:
-            return _fail(f"no survey '{slug}'")
-        limit = max(1, min(int(limit), 200))
-        rows = db.execute(
-            "SELECT id, submitted_at, response_json FROM responses WHERE survey_id = ? "
-            "ORDER BY id DESC LIMIT ? OFFSET ?",
-            (row["id"], limit, max(0, int(offset))),
-        ).fetchall()
-        total = _response_count(db, row["id"])
-        return {
-            "slug": slug, "total": total, "returned": len(rows), "offset": offset,
-            "responses": [{"id": r["id"], "submitted_at": r["submitted_at"],
-                           "data": json.loads(r["response_json"])} for r in rows],
-        }
     finally:
         db.close()
 
@@ -531,9 +511,9 @@ def _report_of(row) -> dict:
 
 
 @mcp.tool()
-def question_summary(slug: str, name: str = None, by: str = None,
-                     audience: str = "owner") -> dict:
-    """What people answered, as one typed aggregate per question.
+def question_summary(slug: str, name: str = None, audience: str = "public") -> dict:
+    """What people answered, as one typed aggregate per question, at the level a
+    published results page would show it.
 
     This is the same computation the results page draws, handed over as numbers.
     Every aggregate carries three counts that differ under branching and
@@ -542,18 +522,22 @@ def question_summary(slug: str, name: str = None, by: str = None,
     percentage quoted without the denominator it belongs to is the error this
     surface exists to make hard.
 
-    `name` restricts to one question. `by` splits by a condition variable, which
-    is the owner's view of an experiment. `audience` set to "respondent" or
-    "public" returns what that level would be served instead — masked cells,
-    no open answers — which is how to check what a published report exposes
-    without opening it in another browser.
+    `name` restricts to one question. `audience` is "public" or "respondent",
+    which today filter alike: cells under five masked, a question under five
+    answers reported as below threshold, no open answers, no split by arm. It is
+    also how to check what a published report exposes without opening it in
+    another browser.
 
-    Open answers are returned only when a single question is asked for by name,
-    capped at 200, because a survey-wide call would otherwise return every word
-    anybody wrote.
+    The owner's view is not offered here. Unmasked cells, open text and the
+    breakdown by condition stay on the owner's results page and in the export,
+    which are read by a person and do not travel to a model provider.
     """
+    if audience == aggregate.OWNER:
+        return _fail("the owner's view is not available to a model: open answers, "
+                     "unmasked cells and the split by arm stay on the results page "
+                     "and in the export. Use audience 'public' or 'respondent'.")
     if audience not in aggregate.AUDIENCES:
-        return _fail(f"audience must be one of {', '.join(aggregate.AUDIENCES)}")
+        return _fail("audience must be 'public' or 'respondent'")
     db = _db()
     try:
         row = _owned(db, slug)
@@ -566,19 +550,10 @@ def question_summary(slug: str, name: str = None, by: str = None,
         responses = [json.loads(r["response_json"]) for r in db.execute(
             "SELECT response_json FROM responses WHERE survey_id = ?", (row["id"],))]
         out = aggregate.summarise(schema, pools, responses,
-                                  only=[name] if name else None, by=by)
-
-        questions = []
-        for q in out["questions"]:
-            if audience != aggregate.OWNER:
-                q = aggregate.for_audience(q, audience)
-            elif not name:
-                q = {k: v for k, v in q.items() if k not in ("texts", "other_texts")}
-            elif isinstance(q.get("texts"), list) and len(q["texts"]) > 200:
-                q = {**q, "texts": q["texts"][:200], "texts_truncated": True}
-            questions.append(q)
+                                  only=[name] if name else None)
+        questions = [aggregate.for_audience(q, audience) for q in out["questions"]]
         return {"slug": slug, "responses": out["responses"],
-                "audience": audience, "by": by, "questions": questions}
+                "audience": audience, "questions": questions}
     finally:
         db.close()
 

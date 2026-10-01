@@ -196,16 +196,20 @@ all-or-nothing: anything else still configured with the old one stops working to
 `https://your-domain/mcp/k/<key>` for clients that cannot send headers. `PUBLIC_URL` must be
 set, or the transport's DNS-rebinding check refuses every proxied request.
 
-**Reading.** `list_surveys`, `get_survey`, `get_schema`, `randomization_status`,
-`get_responses` (full payloads, including `_conditions` and `_timing`), and `response_stats`,
+**Reading.** `list_surveys`, `get_survey`, `get_schema`, `randomization_status`, and
+`response_stats` (responses per arm, median duration, how often each question was answered),
 whose `never_answered` list is the quick way to find a branch nobody reaches.
 
-**The results, as numbers.** `question_summary` returns what people answered, one typed
-aggregate per question, with `exposed`, `n` and `missing` kept apart because branching and
-randomization make them differ. `by` splits by randomization arm; `audience` set to
-`public` returns what a published page would serve instead — masked cells, no open answers —
-which is how to see what a report exposes without opening it in another browser.
+**The results, as numbers, and only as a page would show them.** `question_summary` returns
+one typed aggregate per question, with `exposed`, `n` and `missing` kept apart because
+branching and randomization make them differ, filtered at the `public` (or `respondent`)
+level: cells under five masked, no open answers, no split by arm. The owner's view is refused.
 `get_report` and `set_report` read and replace the results document itself.
+
+**The model never sees a response.** There is no tool returning payloads, open text or panel
+tokens. Whatever a model reads goes to whoever runs it, and the participant notice says that
+individual answers are seen only by the people running the study; the surface is shaped so
+that stays true. Responses are read in the web pages and the export, by a person.
 
 **Two tools that read the schema instead of the browser.** `preview_flow` returns, for every
 arm at once, the pages a participant walks through in the order they are shown and the
