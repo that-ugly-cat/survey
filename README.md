@@ -141,10 +141,10 @@ python test_flow.py && python test_mcp.py && python test_page_order.py
 python test_panel.py && python test_panel_migration.py && python test_purge.py
 python test_edit_guard.py && python test_review.py
 python test_aggregate.py && python test_report.py && python test_results.py
-python test_stats.py && python test_explore.py
+python test_stats.py && python test_explore.py && python test_banks.py
 ```
 
-`test_flow.py` covers expression evaluation, arm preview and schema validation — no database
+`test_banks.py` covers item banks: allocation balance simulated over 300 participants, quotas, tie-breaking, six simultaneous arrivals, the pending window, validation, the round trip through the page load and the submit (including a forged `_banks` being discarded), the long export, the admin and MCP surfaces, and the guard on pools whose combinations would block the server. `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
 and no server, because that module needs neither. `test_mcp.py` covers the API-key gate,
 ownership, and the write guards. `test_page_order.py` covers counterbalancing, including the
 reorder snippet itself, extracted from `templates/survey.html` and run in node so the test

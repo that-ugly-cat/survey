@@ -24,8 +24,10 @@ import time
 
 import aggregate
 import auth
+import banks
 import crypto
 import explore
+import flow
 import notice as notice_text
 import report as report_model
 import results as results_view
@@ -269,6 +271,28 @@ def init_db():
     """)
     if fresh_assignments:
         _backfill_assignments(db)
+
+    # Item banks (docs/item-banks-spec.md): k items drawn per participant, one
+    # version each, with the share of versions set by the participant's arm.
+    # Loads are computed from the draws, so there are no counters to keep in step.
+    db.executescript("""
+        CREATE TABLE IF NOT EXISTS item_banks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            survey_id   INTEGER NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
+            bank_name   TEXT NOT NULL,
+            bank_order  INTEGER NOT NULL DEFAULT 0,
+            config_json TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS bank_draws (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            bank_id    INTEGER NOT NULL REFERENCES item_banks(id) ON DELETE CASCADE,
+            arm        TEXT NULL,
+            draw_json  TEXT NOT NULL,
+            issued_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            completed  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_bank_draws ON bank_draws (bank_id, completed, issued_at);
+    """)
 
     # The results report: an ordered document of blocks, one per survey. A
     # structure and not a copy of anything, so it lives beside the schema in
@@ -558,6 +582,11 @@ def _assign_condition(db, pool_id: int, pool: list, show_count: int) -> tuple[li
     Returns (pages, assignment_id). The assignment is marked completed only when
     the response is submitted, so page loads that go nowhere do not consume an arm.
     """
+    # Enumerating the combinations is the whole cost of this function, and above
+    # the cap it never finishes. Saves refuse such a pool; one saved before the
+    # guard existed is skipped here rather than allowed to block the server.
+    if banks.pool_combinations(len(pool), show_count) > banks.POOL_COMBINATION_CAP:
+        raise ValueError("pool has too many combinations to enumerate")
     all_conditions = [
         ",".join(sorted(combo))
         for combo in itertools.combinations(pool, show_count)
@@ -588,15 +617,46 @@ def _complete_assignments(db, survey_id: int, ids) -> None:
     survey: an arbitrary id from elsewhere cannot be flipped.
     """
     clean = [int(i) for i in ids if str(i).isdigit()][:10]
-    if not clean:
-        return
-    placeholders = ",".join("?" * len(clean))
-    db.execute(
-        f"""UPDATE assignments SET completed = 1
-            WHERE id IN ({placeholders})
-              AND pool_id IN (SELECT id FROM rand_pools WHERE survey_id = ?)""",
-        (*clean, survey_id),
-    )
+    if clean:
+        placeholders = ",".join("?" * len(clean))
+        db.execute(
+            f"""UPDATE assignments SET completed = 1
+                WHERE id IN ({placeholders})
+                  AND pool_id IN (SELECT id FROM rand_pools WHERE survey_id = ?)""",
+            (*clean, survey_id),
+        )
+    draws = _bank_draw_ids(ids)
+    if draws:
+        placeholders = ",".join("?" * len(draws))
+        db.execute(
+            f"""UPDATE bank_draws SET completed = 1
+                WHERE id IN ({placeholders})
+                  AND bank_id IN (SELECT id FROM item_banks WHERE survey_id = ?)""",
+            (*draws, survey_id),
+        )
+
+
+def _bank_draw_ids(ids) -> list:
+    """Bank draws travel among the assignment ids as 'b<id>', so the client carries
+    them back with no change; anything else is not a draw."""
+    return [int(str(i)[1:]) for i in (ids or []) if re.fullmatch(r"b\d+", str(i))][:10]
+
+
+def _bank_records(db, survey_id: int, ids) -> dict:
+    """What each bank showed this response, read from the server's own ledger. The
+    client sends only the draw ids; it never gets to say what it was shown."""
+    draws = _bank_draw_ids(ids)
+    if not draws:
+        return {}
+    placeholders = ",".join("?" * len(draws))
+    rows = db.execute(
+        f"""SELECT d.id, d.arm, d.draw_json, b.bank_name FROM bank_draws d
+            JOIN item_banks b ON b.id = d.bank_id
+            WHERE d.id IN ({placeholders}) AND b.survey_id = ?""",
+        (*draws, survey_id)).fetchall()
+    return {r["bank_name"]: banks.response_record(r["bank_name"], r["id"], r["arm"],
+                                                  json.loads(r["draw_json"]))
+            for r in rows}
 
 
 # --- panel recruitment helpers ---
@@ -756,8 +816,14 @@ async def survey_page(request: Request, slug: str):
         pool = json.loads(p["pool_pages"])
         sc = p["show_count"]
         if pool and 0 < sc <= len(pool):
+            try:
+                assigned, assignment_id = _assign_condition(db, p["id"], pool, sc)
+            except ValueError:
+                logging.getLogger("survey").error(
+                    "pool %s on %s skipped: C(%d, %d) combinations is above the cap",
+                    p["id"], slug, len(pool), sc)
+                continue
             pool_pages_list.extend(pool)
-            assigned, assignment_id = _assign_condition(db, p["id"], pool, sc)
             assignment_ids.append(assignment_id)
             assigned_pages_list.extend(assigned)
             # condition variable: only meaningful when show_count=1
@@ -787,6 +853,22 @@ async def survey_page(request: Request, slug: str):
                         pmap = None
                     if isinstance(pmap, dict) and isinstance(pmap.get(value), list):
                         page_orders.append({"var": cvar, "pages": pmap[value]})
+    # Item banks: the drawn versions join the assigned pages, every version of the
+    # bank joins the pooled ones (so the browser hides the undrawn), and the draw
+    # order travels as one more page order. The browser needs nothing new.
+    for b in db.execute("SELECT id, config_json FROM item_banks WHERE survey_id = ? "
+                        "ORDER BY bank_order, id", (row["id"],)).fetchall():
+        cfg = banks.normalise(b["config_json"])
+        if not cfg["items"] or cfg["show_count"] > len(cfg["items"]):
+            continue
+        got = banks.assign(db, b["id"], cfg, PENDING_ASSIGNMENT_MINUTES)
+        pool_pages_list.extend(banks.bank_pages(cfg))
+        drawn = [d["page"] for d in got["draw"]]
+        assigned_pages_list.extend(drawn)
+        assignment_ids.append(f"b{got['draw_id']}")
+        page_orders.append({"var": cfg["arm_var"] or f"_bank_{cfg['name']}", "pages": drawn})
+        if cfg["arm_var"] and got["arm"] is not None:
+            conditions[cfg["arm_var"]] = got["arm"]
     assigned_pages = assigned_pages_list or None
     pool_pages = pool_pages_list or None
     db.close()
@@ -828,6 +910,13 @@ async def submit(slug: str, request: Request):
     outcome = str(data.get("_outcome") or "complete").strip().lower()
     if outcome not in PANEL_OUTCOMES:
         outcome = "complete"
+
+    # What the item banks showed this person comes from the server's ledger, never
+    # from the payload: a client-supplied _banks is discarded.
+    data.pop("_banks", None)
+    shown = _bank_records(db, row["id"], data.get("_assignment_ids"))
+    if shown:
+        data["_banks"] = shown
 
     view_token = secrets.token_urlsafe(16)
     try:
@@ -996,6 +1085,9 @@ async def manage_survey(slug: str, request: Request):
     pool_count = db.execute(
         "SELECT COUNT(*) FROM rand_pools WHERE survey_id = ?", (row["id"],)
     ).fetchone()[0]
+    bank_count = db.execute(
+        "SELECT COUNT(*) FROM item_banks WHERE survey_id = ?", (row["id"],)
+    ).fetchone()[0]
     owner = db.execute(
         "SELECT email FROM users WHERE id = ?", (row["owner_id"],)
     ).fetchone()
@@ -1025,6 +1117,7 @@ async def manage_survey(slug: str, request: Request):
         "response_count": stats["n"],
         "last_response": stats["last"],
         "pool_count": pool_count,
+        "bank_count": bank_count,
         "files_count": files_count,
         "report_blocks": len(stored_report["blocks"]),
         "report_audience": stored_report["audience"],
@@ -1698,11 +1791,33 @@ def _randomization_context(db, survey, slug: str) -> dict:
             "total": sum(c["count"] for c in counts),
             "pending_total": sum(c["pending"] for c in counts),
         })
+    schema = json.loads(survey["schema_json"])
+    pools_flow = [{"pool_name": p["pool_name"], "pool_pages": json.loads(p["pool_pages"]),
+                   "condition_var": p["condition_var"]} for p in pools_raw]
+    bank_rows = _bank_rows(db, survey["id"])
+    cfgs = [cfg for _, cfg in bank_rows]
+    banks_data = []
+    for i, (bank_id, cfg) in enumerate(bank_rows):
+        errors, warnings = flow.bank_findings(schema, pools_flow, cfgs, i)
+        banks_data.append({
+            "id": bank_id,
+            "cfg": cfg,
+            "items_json": json.dumps(cfg["items"], indent=1),
+            "arms_json": json.dumps(cfg["arms"], indent=1),
+            "status": banks.status(db, bank_id, cfg, PENDING_ASSIGNMENT_MINUTES),
+            "errors": errors,
+            "warnings": warnings,
+        })
+    n_responses = db.execute("SELECT COUNT(*) FROM responses WHERE survey_id = ?",
+                             (survey["id"],)).fetchone()[0]
     return {
         "slug": slug,
         "title": survey["title"],
         "page_names": page_names,
         "pools": pools_data,
+        "banks": banks_data,
+        "n_responses": n_responses,
+        "default_item_regex": banks.DEFAULT_ITEM_REGEX,
     }
 
 
@@ -1801,6 +1916,14 @@ async def save_pool(slug: str, pool_id: int, request: Request):
     def where(exc: json.JSONDecodeError) -> str:
         return f"{exc.msg}, line {exc.lineno} column {exc.colno}"
 
+    n_combos = banks.pool_combinations(len(pool_pages), show_count)
+    if n_combos > banks.POOL_COMBINATION_CAP:
+        return refuse(
+            f"Showing {show_count} of {len(pool_pages)} pages makes {n_combos:,} combinations. "
+            f"A pool enumerates all of them at every page load, and above "
+            f"{banks.POOL_COMBINATION_CAP:,} that blocks the server. To sample items from a "
+            f"large set, use an item bank. Nothing was saved.")
+
     # condition_map and page_order only apply when show_count = 1 with a
     # condition variable; outside that they are dropped, as they always were.
     condition_map = None
@@ -1866,6 +1989,156 @@ async def delete_pool(slug: str, pool_id: int, request: Request):
         return RedirectResponse("/login", status_code=302)
     if _pool_belongs(db, slug, pool_id, user):
         db.execute("DELETE FROM rand_pools WHERE id = ?", (pool_id,))
+        db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+# --- admin item banks ---
+
+def _bank_rows(db, survey_id: int) -> list:
+    """[(bank id, config)] in display order."""
+    return [(r["id"], banks.normalise(r["config_json"])) for r in db.execute(
+        "SELECT id, config_json FROM item_banks WHERE survey_id = ? ORDER BY bank_order, id",
+        (survey_id,)).fetchall()]
+
+
+def _bank_belongs(db, slug: str, bank_id: int, user):
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        return None
+    row = db.execute("SELECT survey_id FROM item_banks WHERE id = ?", (bank_id,)).fetchone()
+    return survey if (row and row["survey_id"] == survey["id"]) else None
+
+
+def bank_save_errors(db, survey, bank_id, cfg) -> tuple[list, list]:
+    """The checks a bank must pass before it is stored: flow's validation against the
+    schema, the pools and the other banks, with this config in place of the old one.
+    Shared by the admin route and the MCP tool, so the two refuse the same things."""
+    schema = json.loads(survey["schema_json"])
+    pools = [{"pool_name": r["pool_name"], "pool_pages": json.loads(r["pool_pages"]),
+              "condition_var": r["condition_var"]} for r in db.execute(
+        "SELECT pool_name, pool_pages, condition_var FROM rand_pools WHERE survey_id = ?",
+        (survey["id"],)).fetchall()]
+    rows = _bank_rows(db, survey["id"])
+    cfgs = [c for i, c in rows if i != bank_id] + [cfg]
+    return flow.bank_findings(schema, pools, cfgs, len(cfgs) - 1)
+
+
+def store_bank(db, survey_id: int, bank_id, cfg) -> int:
+    """Create or replace a bank. Replacing resets its draws, as saving a pool resets
+    its assignments: a balance computed under another configuration means nothing."""
+    if bank_id is None:
+        order = db.execute("SELECT COALESCE(MAX(bank_order) + 1, 0) FROM item_banks "
+                           "WHERE survey_id = ?", (survey_id,)).fetchone()[0]
+        bank_id = db.execute(
+            "INSERT INTO item_banks (survey_id, bank_name, bank_order, config_json) VALUES (?,?,?,?)",
+            (survey_id, cfg["name"], order, json.dumps(cfg))).lastrowid
+    else:
+        db.execute("UPDATE item_banks SET bank_name = ?, config_json = ? WHERE id = ?",
+                   (cfg["name"], json.dumps(cfg), bank_id))
+        db.execute("DELETE FROM bank_draws WHERE bank_id = ?", (bank_id,))
+    db.commit()
+    return bank_id
+
+
+@app.post("/admin/surveys/{slug}/randomization/add-bank")
+async def add_bank(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _owned_survey(db, slug, user)
+    if survey:
+        # an empty bank is stored and stays inert until it has items: the page load
+        # skips a bank that cannot draw
+        n = len(_bank_rows(db, survey["id"])) + 1
+        store_bank(db, survey["id"], None, banks.normalise({"name": f"bank{n}", "show_count": 1}))
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/save")
+async def save_bank(slug: str, bank_id: int, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    survey = _bank_belongs(db, slug, bank_id, user)
+    if not survey:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    form = await request.form()
+    typed = {k: form.get(k, "") for k in ("bank_name", "show_count", "arm_var", "order",
+                                          "items_json", "arms_json")}
+
+    def refuse(message: str):
+        """The page back, with the reason and with what was typed: nothing is written."""
+        context = _randomization_context(db, survey, slug)
+        db.close()
+        for bank in context["banks"]:
+            if bank["id"] == bank_id:
+                bank["cfg"] = {**bank["cfg"], "name": typed["bank_name"],
+                               "arm_var": typed["arm_var"], "order": typed["order"]}
+                bank["typed_show_count"] = typed["show_count"]
+                bank["items_json"] = typed["items_json"]
+                bank["arms_json"] = typed["arms_json"]
+        context["bank_error"] = message
+        context["error_bank_id"] = bank_id
+        return templates.TemplateResponse(request, "randomization.html", context, status_code=400)
+
+    try:
+        items = json.loads(typed["items_json"] or "[]")
+    except json.JSONDecodeError as exc:
+        return refuse(f"Items are not valid JSON ({exc.msg}, line {exc.lineno} column "
+                      f"{exc.colno}). Nothing was saved.")
+    try:
+        arms = json.loads(typed["arms_json"] or "[]")
+    except json.JSONDecodeError as exc:
+        return refuse(f"Arms are not valid JSON ({exc.msg}, line {exc.lineno} column "
+                      f"{exc.colno}). Nothing was saved.")
+    if not isinstance(items, list) or not isinstance(arms, list):
+        return refuse("Items and arms must each be a JSON list. Nothing was saved.")
+    try:
+        cfg = banks.normalise({"name": typed["bank_name"], "items": items,
+                               "show_count": int(typed["show_count"] or 1),
+                               "arm_var": typed["arm_var"], "arms": arms,
+                               "order": typed["order"]})
+    except (TypeError, ValueError, AttributeError) as exc:
+        return refuse(f"The configuration could not be read: {exc}. Nothing was saved.")
+    errors, _warnings = bank_save_errors(db, survey, bank_id, cfg)
+    if errors:
+        return refuse("This bank cannot be saved: " + "; ".join(errors) + ". Nothing was saved.")
+    store_bank(db, survey["id"], bank_id, cfg)
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/reset")
+async def reset_bank(slug: str, bank_id: int, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _bank_belongs(db, slug, bank_id, user):
+        db.execute("DELETE FROM bank_draws WHERE bank_id = ?", (bank_id,))
+        db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/delete")
+async def delete_bank(slug: str, bank_id: int, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if _bank_belongs(db, slug, bank_id, user):
+        db.execute("DELETE FROM item_banks WHERE id = ?", (bank_id,))
         db.commit()
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
@@ -2091,6 +2364,50 @@ async def export_xlsx(slug: str, request: Request):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{slug}.xlsx"'},
     )
+
+
+def _long_export(db, slug: str):
+    """(columns, rows) of the item-bank long table, or None when the survey is not
+    there. One row per response x drawn item: what a mixed model wants."""
+    row = db.execute("SELECT id FROM surveys WHERE slug = ?", (slug,)).fetchone()
+    if not row:
+        return None
+    responses = db.execute("SELECT id, response_json, submitted_at FROM responses "
+                           "WHERE survey_id = ? ORDER BY submitted_at", (row["id"],)).fetchall()
+    return banks.long_rows(responses)
+
+
+@app.get("/admin/surveys/{slug}/export-long.{fmt}")
+async def export_long(slug: str, fmt: str, request: Request):
+    if fmt not in ("csv", "xlsx"):
+        return JSONResponse({"error": "not found"}, status_code=404)
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    if not _owned_survey(db, slug, user):
+        db.close()
+        return JSONResponse({"error": "not found"}, status_code=404)
+    got = _long_export(db, slug)
+    db.close()
+    if got is None:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    cols, rows = got
+    if not rows:
+        return HTMLResponse("No item-bank answers yet.")
+    if fmt == "xlsx":
+        return StreamingResponse(
+            io.BytesIO(_build_xlsx(cols, rows)),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{slug}-long.xlsx"'})
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore", restval="")
+    writer.writeheader()
+    writer.writerows(rows)
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")), media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{slug}-long.csv"'})
 
 
 @app.get("/admin/surveys/{slug}/review.docx")

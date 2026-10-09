@@ -88,6 +88,21 @@ Assignments issued and never submitted are cleared out after a week, since a ses
 
 The pattern worth copying, from the PGT/GGE vignette study: **two orthogonal pools instead of one pool with more arms** — one assigning the version (`condition` → A/B/C), one assigning the order (`vorder` → PGT_FIRST/GGE_FIRST). One four-page pool would split 25/25/25/25 and send half the sample to the wrong place; two pools hold a third per version and balance order within one of them, recruiting nobody extra.
 
+**A pool cannot sample from many pages.** It enumerates every combination of its pages at each page load, so showing 10 of 160 pages would mean some 10¹⁶ combinations. A pool above 10,000 combinations is refused at save, with the count in the message; that is what item banks are for.
+
+### Item banks
+
+An **item bank** gives each participant a sample of *items*, one *version* of each, in an order, with the share of versions set by their *arm*. It is the tool for stimulus banks: passages, vignettes or cases, each existing in several versions, of which each participant sees a handful.
+
+- **Items and versions.** Each version is a page of the schema, named for instance `P017_H` and `P017_L`. Versions keep their own question names, so an answer always lands in a column that says which item and which version it belongs to. Name the questions `<page>_<role>` (`P017_H_quality`): the long export lines answers up by role across versions. On the randomization page, **Propose from page names** builds the item list from the schema with a regex, and lists the pages it left out.
+- **Show** — how many items each participant gets. A bank never shows two versions of the same item to the same person.
+- **Arms** — optional quotas of versions, each summing to Show: `[{"name": "LLM30", "quota": {"H": 7, "L": 3}}]`. The drawn arm is exposed under the **arm variable**, like a pool's condition, so it can drive `visibleIf` anywhere. Without arms, each item gets the version it has been shown in least.
+- **Balance.** The least-used arm is drawn, then the least-shown items, then versions are assigned so that each item moves toward an even split while the arm's quota is met exactly. As for pools, completed responses count, plus draws issued in the last hour. The page states the result in one line — how often items have been shown and the largest gap between an item's versions — with the per-item table one click away.
+- **Rules.** A page belongs to one bank at most and never to a bank and a pool. Common pages (consent, demographics, debrief) stay outside both and are shown to everyone. Saving a bank resets its draws, for the same reason saving a pool resets its counters.
+- **Data.** Each response records what it was shown (arm, items, versions, pages), written by the server from its own ledger, so it survives a deleted bank. The flat export carries it as columns; the **long export** on the survey page gives one row per response and drawn item, the table a mixed model wants.
+
+The specification, with the allocation algorithm and its guarantees, is `docs/item-banks-spec.md`.
+
 ## 6. Fielding it
 
 **Share** gives you the public URL and a **QR code** to right-click and drop into slides or a poster. The link works while the survey is open, and anyone holding it can answer — there are no per-participant links, no email invitations, and no limit on how many times the same person can respond. If you need one-response-per-person, that comes from panel recruitment or from the recruitment platform you are using, not from Survey.

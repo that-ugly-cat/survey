@@ -123,6 +123,25 @@
     }
     .help-btn:hover { border-color: #4a6fa5; color: #4a6fa5; }
 
+    .section-head { display: flex; align-items: center; gap: 0.6rem; margin: 2.5rem 0 0.4rem; }
+    .section-head h2 { font-size: 1rem; font-weight: 700; color: #e2e8f0; }
+    .bank-warning {
+      padding: 0.5rem 0.8rem; background: #2a2412; border: 1px solid #6b5a1f;
+      border-radius: 6px; font-size: 0.78rem; color: #ecc94b;
+      margin-bottom: 0.6rem; line-height: 1.6;
+    }
+    .bank-select {
+      padding: 0.4rem 0.6rem; background: #0f1117; border: 1px solid #2d3148;
+      border-radius: 6px; color: #e2e8f0; font-size: 0.82rem;
+    }
+    .bank-verdict { font-size: 0.82rem; color: #a0aec0; margin-bottom: 0.6rem; }
+    /* the regex shares its row with the propose button: it takes what is left,
+       and may shrink below its content instead of pushing the button off the card */
+    .bank-regex { font-family: monospace; font-size: 0.78rem; flex: 1; width: auto; min-width: 0; }
+    .count-row { flex-wrap: wrap; }
+    .arms-ok { color: #68d391; }
+    .arms-bad { color: #fc8181; }
+
     .modal-overlay {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.65); z-index: 100;
@@ -317,7 +336,159 @@
       </form>
     </div>
 
+    <div class="section-head">
+      <h2>Item banks</h2>
+      <button class="help-btn" onclick="document.getElementById('bank-help').classList.add('open')" title="How item banks work">?</button>
+    </div>
+    <p class="hint" style="margin-bottom:1rem;">Each participant gets a sample of items from the bank, one version of each, in an order — with the share of versions set by their arm. For sampling from many pages, where a pool would have too many combinations.</p>
+
+    {% for bank in banks %}
+    {% set st = bank.status %}
+    <div class="pool-card">
+      <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/save"
+            onsubmit="return confirm('Save this bank and reset its draws?{% if n_responses %} The survey already holds {{ n_responses }} response(s): the balance starts again from zero.{% endif %}')">
+        {% if bank_error and error_bank_id == bank.id %}
+        <div class="pool-error">{{ bank_error }}</div>
+        {% endif %}
+        {% for message in bank.errors %}<div class="pool-error">{{ message }}</div>{% endfor %}
+        {% for message in bank.warnings %}<div class="bank-warning">{{ message }}</div>{% endfor %}
+
+        <div class="pool-header">
+          <input type="text" name="bank_name" value="{{ bank.cfg.name }}" placeholder="Bank name">
+        </div>
+
+        <div class="count-row">
+          <label>Show</label>
+          <input type="number" name="show_count" min="1" max="50" value="{{ bank.typed_show_count or bank.cfg.show_count }}"
+                 class="bank-k" data-bank="{{ bank.id }}">
+          <label>item(s) per participant, in</label>
+          <select name="order" class="bank-select">
+            <option value="random" {% if bank.cfg.order == 'random' %}selected{% endif %}>random order</option>
+            <option value="fixed" {% if bank.cfg.order == 'fixed' %}selected{% endif %}>schema order</option>
+          </select>
+        </div>
+
+        <div class="field-label">
+          Items <span class="hint-inline">(JSON: each item and its versions, one page per version)</span>
+        </div>
+        <div class="count-row" style="margin-top:0.2rem;">
+          <input type="text" class="cond-input bank-regex" data-bank="{{ bank.id }}" value="{{ default_item_regex }}"
+                 title="A regex with named groups item and version, matched against the page names">
+          <button type="button" class="btn-sm btn-secondary" onclick="proposeItems({{ bank.id }})">Propose from page names</button>
+        </div>
+        <p class="hint bank-propose-note" id="propose-note-{{ bank.id }}"></p>
+        <textarea name="items_json" rows="6" class="cond-textarea" id="items-{{ bank.id }}"
+                  placeholder='[{"item": "P001", "versions": {"H": "P001_H", "L": "P001_L"}}]'>{{ bank.items_json }}</textarea>
+
+        <div class="field-label" style="margin-top:0.75rem;">
+          Arm variable <span class="hint-inline">(the name the drawn arm travels under, usable in visibleIf)</span>
+        </div>
+        <input type="text" name="arm_var" value="{{ bank.cfg.arm_var or '' }}" placeholder="e.g. arm" class="cond-input">
+
+        <div class="field-label" style="margin-top:0.75rem;">
+          Arms <span class="hint-inline">(optional JSON: each arm's quota of versions; each quota sums to Show)</span>
+        </div>
+        <textarea name="arms_json" rows="5" class="cond-textarea bank-arms" id="arms-{{ bank.id }}" data-bank="{{ bank.id }}"
+                  placeholder='[{"name": "LLM30", "quota": {"H": 7, "L": 3}}]'>{{ bank.arms_json }}</textarea>
+        <p class="hint" id="arms-check-{{ bank.id }}"></p>
+
+        <p class="hint">Saving resets this bank's draws.</p>
+        <div class="pool-actions">
+          <button type="submit" class="btn-primary">Save bank</button>
+        </div>
+      </form>
+
+      <div class="balance-header">
+        <span class="balance-title">Balance{% if st.completed %} — {{ st.completed }} completed{% endif %}</span>
+        {% if st.completed %}
+        <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/reset"
+              onsubmit="return confirm('Reset the draws of {{ bank.cfg.name }}?')">
+          <button class="btn-sm btn-secondary">Reset</button>
+        </form>
+        {% endif %}
+      </div>
+      {% if st.completed %}
+      <p class="bank-verdict">
+        {% if st.exposure_max - st.exposure_min <= 1 and st.version_imbalance_max <= 2 %}Balanced:{% else %}Drifting:{% endif %}
+        every item shown {{ st.exposure_min }}–{{ st.exposure_max }} times; the largest gap between an item's versions is {{ st.version_imbalance_max }}.
+      </p>
+      {% if st.arms %}
+      <table>
+        <thead><tr><th>Arm</th><th>Completed</th><th>In progress</th></tr></thead>
+        <tbody>
+          {% for name, c in st.arms.items() %}
+          <tr><td class="cond-key">{{ name }}</td><td><span class="count-n">{{ c.completed }}</span></td><td><span class="pct">{{ c.in_progress or '—' }}</span></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <details style="margin-top:0.8rem;">
+        <summary class="hint" style="cursor:pointer;">Per item</summary>
+        <table>
+          <thead><tr><th>Item</th><th>Shown</th><th>By version</th></tr></thead>
+          <tbody>
+            {% for it in st.per_item %}
+            <tr><td class="cond-key">{{ it.item }}</td><td>{{ it.shown }}</td>
+                <td class="pct">{% for lb, n in it.versions.items() %}{{ lb }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </details>
+      {% else %}
+        <p class="empty-counts">No completed draws yet.</p>
+      {% endif %}
+
+      <div style="margin-top:1rem;">
+        <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/delete"
+              onsubmit="return confirm('Delete bank {{ bank.cfg.name }} and its draws? Responses keep the record of what they were shown.')">
+          <button class="btn-sm btn-danger">Delete bank</button>
+        </form>
+      </div>
+    </div>
+    {% else %}
+      <p class="empty-pools">No item banks.</p>
+    {% endfor %}
+
+    <div class="add-pool-wrap">
+      <form method="post" action="/admin/surveys/{{ slug }}/randomization/add-bank">
+        <button class="btn-add">+ Add item bank</button>
+      </form>
+    </div>
+
   </main>
+
+  <div class="modal-overlay" id="bank-help">
+    <div class="modal">
+      <button class="modal-close" onclick="document.getElementById('bank-help').classList.remove('open')">✕</button>
+      <h3>How item banks work</h3>
+
+      <h4>Items and versions</h4>
+      <p>An item is a unit of content; a version is one rendering of it, and <strong>each version is a page of the schema</strong>. Each version keeps its own question names, so an answer always lands in a column that says which item and which version it belongs to.</p>
+      <pre>[{"item": "P001", "versions": {"H": "P001_H", "L": "P001_L"}}]</pre>
+      <p><strong>Propose from page names</strong> builds this list from the schema, with a regex whose groups <code>item</code> and <code>version</code> split each page name. Pages that do not match are listed so nothing is left out unnoticed.</p>
+
+      <h4>What a participant gets</h4>
+      <p>First an arm, then <strong>Show</strong> items, one version of each, in random or schema order. The pages of the bank that were not drawn are hidden; nothing else moves. A bank never shows two versions of the same item to the same person.</p>
+
+      <h4>Arms</h4>
+      <p>Optional. Each arm is a quota of versions that sums to Show:</p>
+      <pre>[{"name": "LLM30", "quota": {"H": 7, "L": 3}},
+ {"name": "LLM70", "quota": {"H": 3, "L": 7}}]</pre>
+      <p>The drawn arm is exposed under the <strong>arm variable</strong>, like a pool's condition, so it can drive <code>visibleIf</code> anywhere in the survey. Without arms, each item gets the version it has been shown in least.</p>
+
+      <h4>Balance</h4>
+      <p>The least-used arm is drawn, then the least-shown items, then versions are assigned so that each item moves toward an even split across its versions while the arm's quota is met exactly. As for pools, the count that drives this is completed responses plus draws issued in the last hour.</p>
+
+      <h4>Pages and questions</h4>
+      <p>A page belongs to at most one bank, and never to a bank and a pool. Name the questions on a version page <code>&lt;page&gt;_&lt;role&gt;</code> (<code>P001_H_quality</code>): the long export strips the page name and lines the answers up by role across versions.</p>
+
+      <h4>Data</h4>
+      <p>Each response records what it was shown — arm, items, versions, pages — from the server's own ledger, so the record survives a deleted bank. <strong>Long export</strong> on the survey page gives one row per response and drawn item, the table a mixed model wants.</p>
+
+      <h4>Saving resets the draws</h4>
+      <p>A balance computed under another configuration means nothing, so saving starts it again. <strong>Reset</strong> clears the draws without changing the configuration.</p>
+    </div>
+  </div>
 
   <script>
     // close the help modal on backdrop click and on Escape, matching the manage page
@@ -332,6 +503,65 @@
           o.classList.remove('open');
         });
       }
+    });
+
+    // --- item banks ---
+    var PAGE_NAMES = {{ page_names | tojson }};
+
+    // Items from the page names, with the same named groups the server's helper uses.
+    // Python's (?P<name>...) is spelled (?<name>...) in JavaScript.
+    function proposeItems(bankId) {
+      var src = document.querySelector('.bank-regex[data-bank="' + bankId + '"]').value;
+      var note = document.getElementById('propose-note-' + bankId);
+      var rx;
+      try { rx = new RegExp(src.replace(/\(\?P</g, '(?<')); }
+      catch (e) { note.textContent = 'The regex does not compile: ' + e.message; return; }
+      var items = [], index = {}, unmatched = [];
+      PAGE_NAMES.forEach(function(name) {
+        var m = rx.exec(name);
+        if (!m || !m.groups || m.groups.item === undefined || m.groups.version === undefined) {
+          unmatched.push(name); return;
+        }
+        if (!index[m.groups.item]) {
+          index[m.groups.item] = {item: m.groups.item, versions: {}};
+          items.push(index[m.groups.item]);
+        }
+        index[m.groups.item].versions[m.groups.version] = name;
+      });
+      // only pages that came in as part of a multi-version family are offered: a lone
+      // match is more likely a common page with an underscore in its name
+      var multi = items.filter(function(it) { return Object.keys(it.versions).length > 1; });
+      var lone = items.filter(function(it) { return Object.keys(it.versions).length < 2; })
+                      .map(function(it) { return Object.values(it.versions)[0]; });
+      document.getElementById('items-' + bankId).value = JSON.stringify(multi, null, 1);
+      note.textContent = multi.length + ' item(s) proposed. Left out: ' +
+        (unmatched.concat(lone).join(', ') || 'nothing') + '. Check the list, then save.';
+      checkArms(bankId);
+    }
+
+    // Each arm's quota must sum to Show: said as it is typed, not only at save.
+    function checkArms(bankId) {
+      var out = document.getElementById('arms-check-' + bankId);
+      var k = parseInt(document.querySelector('.bank-k[data-bank="' + bankId + '"]').value) || 0;
+      var raw = document.getElementById('arms-' + bankId).value.trim();
+      if (!raw || raw === '[]') { out.textContent = 'No arms: each item gets its least-shown version.'; out.className = 'hint'; return; }
+      var arms;
+      try { arms = JSON.parse(raw); } catch (e) { out.textContent = 'Not valid JSON yet.'; out.className = 'hint arms-bad'; return; }
+      if (!Array.isArray(arms)) { out.textContent = 'Arms must be a list.'; out.className = 'hint arms-bad'; return; }
+      var bad = [];
+      arms.forEach(function(a) {
+        var sum = Object.values((a && a.quota) || {}).reduce(function(s, n) { return s + (parseInt(n) || 0); }, 0);
+        if (sum !== k) bad.push((a && a.name || '?') + ' sums to ' + sum);
+      });
+      out.textContent = bad.length ? 'Each quota must sum to ' + k + ': ' + bad.join('; ') + '.'
+                                   : arms.length + ' arm(s), every quota sums to ' + k + '.';
+      out.className = 'hint ' + (bad.length ? 'arms-bad' : 'arms-ok');
+    }
+    document.querySelectorAll('.bank-arms').forEach(function(t) {
+      var id = t.dataset.bank;
+      t.addEventListener('input', function() { checkArms(id); });
+      document.querySelector('.bank-k[data-bank="' + id + '"]').addEventListener('input', function() { checkArms(id); });
+      checkArms(id);
     });
 
     document.querySelectorAll('.show-count-input').forEach(function(input) {

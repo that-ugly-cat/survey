@@ -44,6 +44,7 @@ from mcp.server.mcpserver import MCPServer
 
 import aggregate
 import auth
+import banks
 import flow
 import main
 import report as report_model
@@ -100,6 +101,10 @@ def _pools(db, survey_id: int) -> list:
             "page_order": json.loads(r["page_order"]) if r["page_order"] else None,
         })
     return out
+
+
+def _bank_cfgs(db, survey_id: int) -> list:
+    return [cfg for _, cfg in main._bank_rows(db, survey_id)]
 
 
 def _schema(row) -> dict:
@@ -186,7 +191,8 @@ def preview_flow(slug: str, answers: dict = None) -> dict:
         if not row:
             return _fail(f"no survey '{slug}'")
         return {"slug": slug,
-                "arms": flow.preview(_schema(row), _pools(db, row["id"]), answers or {})}
+                "arms": flow.preview(_schema(row), _pools(db, row["id"]), answers or {},
+                                     bank_cfgs=_bank_cfgs(db, row["id"]))}
     finally:
         db.close()
 
@@ -205,7 +211,7 @@ def validate_survey(slug: str) -> dict:
         row = _owned(db, slug)
         if not row:
             return _fail(f"no survey '{slug}'")
-        findings = flow.validate(_schema(row), _pools(db, row["id"]))
+        findings = flow.validate(_schema(row), _pools(db, row["id"]), _bank_cfgs(db, row["id"]))
         return {"slug": slug, "findings": findings,
                 "errors": sum(1 for f in findings if f["severity"] == "error"),
                 "warnings": sum(1 for f in findings if f["severity"] == "warning")}
@@ -403,6 +409,11 @@ def set_pool(slug: str, pool_pages: list, pool_name: str = "Pool", show_count: i
         show = max(1, int(show_count))
         if show > len(pool_pages):
             return _fail(f"cannot show {show} of {len(pool_pages)} pages")
+        n_combos = banks.pool_combinations(len(pool_pages), show)
+        if n_combos > banks.POOL_COMBINATION_CAP:
+            return _fail(f"{n_combos} combinations: a pool enumerates them all at every page "
+                         f"load, and above {banks.POOL_COMBINATION_CAP} that blocks the server. "
+                         f"To sample items from a large set, use set_bank.")
         var = (condition_var or "").strip() or None
         cmap = json.dumps(condition_map) if (condition_map and show == 1 and var) else None
         porder = None
@@ -438,6 +449,84 @@ def set_pool(slug: str, pool_pages: list, pool_name: str = "Pool", show_count: i
         return {"slug": slug, "pool_id": pool_id, "counters_reset": True,
                 "pools": _pools(db, row["id"]),
                 "findings": flow.validate(_schema(row), _pools(db, row["id"]))}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def set_bank(slug: str, config: dict, bank_id: int = None) -> dict:
+    """Create an item bank, or replace one by id: each participant gets `show_count`
+    items from it, one version of each, in an order, with the share of versions set
+    by the participant's arm.
+
+    config: {"name", "items": [{"item": "P001", "versions": {"H": "P001_H", ...}}],
+    "show_count", "arm_var", "arms": [{"name": "LLM30", "quota": {"H": 7, "L": 3}}],
+    "order": "random" | "fixed"}. Each version is a page of the schema; a page belongs
+    to one bank at most and never to a pool. Each arm's quota sums to show_count.
+
+    Refused with the reasons when it would not work; saved with warnings when it would
+    work badly. Saving resets this bank's draws, as saving a pool resets its counters.
+    See docs/item-banks-spec.md.
+    """
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        if bank_id is not None and not db.execute(
+                "SELECT 1 FROM item_banks WHERE id = ? AND survey_id = ?",
+                (bank_id, row["id"])).fetchone():
+            return _fail(f"no bank {bank_id} on '{slug}'")
+        try:
+            cfg = banks.normalise(config)
+        except (TypeError, ValueError, AttributeError) as exc:
+            return _fail(f"the configuration could not be read: {exc}")
+        errors, warnings = main.bank_save_errors(db, row, bank_id, cfg)
+        if errors:
+            return {"error": "the bank was not saved", "errors": errors, "warnings": warnings}
+        bank_id = main.store_bank(db, row["id"], bank_id, cfg)
+        return {"slug": slug, "bank_id": bank_id, "draws_reset": True, "warnings": warnings,
+                "example": banks.example_draw(cfg)[:3]}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def delete_bank(slug: str, bank_id: int) -> dict:
+    """Delete an item bank and its draws. Responses keep the record of what they were
+    shown, so the data survive it."""
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        cur = db.execute("DELETE FROM item_banks WHERE id = ? AND survey_id = ?",
+                         (bank_id, row["id"]))
+        db.commit()
+        if not cur.rowcount:
+            return _fail(f"no bank {bank_id} on '{slug}'")
+        return {"slug": slug, "deleted": bank_id}
+    finally:
+        db.close()
+
+
+@mcp.tool()
+def bank_status(slug: str) -> dict:
+    """Per item bank: completed draws per arm and in flight, how often each item has
+    been shown and in which version, and the largest gap between an item's versions.
+    Counts only: no response content."""
+    db = _db()
+    try:
+        row = _owned(db, slug)
+        if not row:
+            return _fail(f"no survey '{slug}'")
+        out = []
+        for bank_id, cfg in main._bank_rows(db, row["id"]):
+            st = banks.status(db, bank_id, cfg, main.PENDING_ASSIGNMENT_MINUTES)
+            out.append({"bank_id": bank_id, "name": cfg["name"], "show_count": cfg["show_count"],
+                        "items": len(cfg["items"]), "arm_var": cfg["arm_var"],
+                        "arms": [a["name"] for a in cfg["arms"]], **st})
+        return {"slug": slug, "banks": out}
     finally:
         db.close()
 

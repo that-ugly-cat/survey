@@ -382,6 +382,13 @@
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export.json">JSON</a>
       </div>
       <p class="hint mt">CSV and Excel share the same columns; Excel adds a frozen header, filters, and native number types.</p>
+      {% if bank_count %}
+      <div class="btn-row mt">
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export-long.csv">Long CSV</a>
+        <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/export-long.xlsx">Long Excel</a>
+      </div>
+      <p class="hint mt">Item banks: one row per response and drawn item, with arm, position, item and version, and the answers on that item's page lined up by role.</p>
+      {% endif %}
     </section>
 
     <section>

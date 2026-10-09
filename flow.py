@@ -271,7 +271,28 @@ def arms(pools: list) -> list:
     return combos
 
 
-def preview(schema: dict, pools: list, answers: dict = None) -> list:
+def bank_findings(schema: dict, pools: list, bank_cfgs: list, index: int) -> tuple[list, list]:
+    """(errors, warnings) for bank `index`, judged against the schema, the pools and
+    the other banks: the same check whether it runs at save time or in validate()."""
+    import banks
+    pages = schema.get("pages", [])
+    taken = {}
+    for pool in pools:
+        for name in pool.get("pool_pages") or []:
+            taken[name] = f"pool '{pool.get('pool_name') or 'pool'}'"
+    for i, other in enumerate(bank_cfgs):
+        if i != index:
+            for name in banks.bank_pages(other):
+                taken[name] = f"bank '{other['name']}'"
+    return banks.validate(
+        bank_cfgs[index], [p.get("name") for p in pages], taken,
+        {q.get("name") for _, q in all_questions(schema)},
+        {p.get("condition_var") for p in pools if p.get("condition_var")}
+        | {b["arm_var"] for i, b in enumerate(bank_cfgs) if i != index and b.get("arm_var")},
+        {p.get("name"): p for p in pages})
+
+
+def preview(schema: dict, pools: list, answers: dict = None, bank_cfgs: list = ()) -> list:
     """One entry per arm: the pages a participant walks through, in order, and
     the questions on each — marked `always` or `conditional`.
 
@@ -284,9 +305,26 @@ def preview(schema: dict, pools: list, answers: dict = None) -> list:
     follow-ups it opens. Anything left unpinned stays reported as conditional
     rather than assumed either way.
     """
+    import banks
     pooled = {name for pool in pools for name in (pool.get("pool_pages") or [])}
+    pooled |= {name for cfg in bank_cfgs for name in banks.bank_pages(cfg)}
+    # a bank's draws cannot be enumerated, so each of its arms contributes one
+    # example draw, marked as such
+    combos = [dict(a, sequences=[]) for a in arms(pools)]
+    for cfg in bank_cfgs:
+        expanded = []
+        for combo in combos:
+            for ex in banks.example_draw(cfg):
+                values = dict(combo["values"])
+                if cfg.get("arm_var") and ex["arm"] is not None:
+                    values[cfg["arm_var"]] = ex["arm"]
+                drawn = [d["page"] for d in ex["draw"]]
+                expanded.append({"values": values, "pages": combo["pages"] + drawn,
+                                 "sequences": combo["sequences"] + [drawn],
+                                 "example_draw": True})
+        combos = expanded
     out = []
-    for arm in arms(pools):
+    for arm in combos:
         values = {**(answers or {}), **arm["values"]}
         pages = list(schema.get("pages", []))
         for pool in pools:
@@ -295,6 +333,8 @@ def preview(schema: dict, pools: list, answers: dict = None) -> list:
             sequence = order.get(values.get(var)) if var else None
             if isinstance(sequence, list):
                 pages = apply_page_order(pages, sequence)
+        for sequence in arm["sequences"]:
+            pages = apply_page_order(pages, sequence)
 
         walk = []
         for page in pages:
@@ -323,7 +363,10 @@ def preview(schema: dict, pools: list, answers: dict = None) -> list:
                 "condition": page.get("visibleIf") if state is UNKNOWN else None,
                 "questions": questions,
             })
-        out.append({"condition": arm["values"], "assigned_pages": arm["pages"], "pages": walk})
+        entry = {"condition": arm["values"], "assigned_pages": arm["pages"], "pages": walk}
+        if arm.get("example_draw"):
+            entry["example_draw"] = True
+        out.append(entry)
     return out
 
 
@@ -339,7 +382,7 @@ def _choice_values(el: dict) -> list:
     return out
 
 
-def validate(schema: dict, pools: list = ()) -> list:
+def validate(schema: dict, pools: list = (), bank_cfgs: list = ()) -> list:
     """Problems worth a human look, most structural first.
 
     Every finding names the thing it is about, so a caller can act on it without
@@ -371,6 +414,7 @@ def validate(schema: dict, pools: list = ()) -> list:
             position.setdefault(q.get("name"), page_index)
 
     known = set(q_names) | {p.get("condition_var") for p in pools if p.get("condition_var")}
+    known |= {b["arm_var"] for b in bank_cfgs if b.get("arm_var")}
     known |= {"panelToken"}
     for page_index, page in enumerate(pages):
         targets = [(page.get("visibleIf"), page.get("name"), page_index)]
@@ -446,8 +490,17 @@ def validate(schema: dict, pools: list = ()) -> list:
                     add("error", "page_order_missing",
                         f"pool '{label}' orders page '{name}', which is not in the schema", label)
 
+    # item banks: the checks a save runs, so a bank saved before a schema edit is
+    # caught here when the edit breaks it
+    for i, cfg in enumerate(bank_cfgs):
+        errors, warnings = bank_findings(schema, pools, list(bank_cfgs), i)
+        for message in errors:
+            add("error", "bank", f"bank '{cfg['name']}': {message}", cfg["name"])
+        for message in warnings:
+            add("warning", "bank", f"bank '{cfg['name']}': {message}", cfg["name"])
+
     # arms that reach nothing
-    for arm in preview(schema, pools):
+    for arm in preview(schema, pools, bank_cfgs=bank_cfgs):
         reachable = sum(len(p["questions"]) for p in arm["pages"])
         if not reachable:
             add("error", "empty_arm",

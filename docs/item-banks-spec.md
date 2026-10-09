@@ -1,6 +1,6 @@
 # Item banks — specification
 
-*Draft, 9 October 2026. Status: proposed, not implemented.*
+*9 October 2026. Status: implemented (`banks.py`, wired in `main.py`, `flow.py`, `mcp_app.py`; tested in `test_banks.py`). Where the implementation departs from the draft, the text below says so.*
 
 ## 1. The problem
 
@@ -168,8 +168,12 @@ The response keeps its own record of what it was shown, so the data survive a de
 
 ```json
 "_banks": {"passages": {"arm": "LLM30", "draw_id": 41,
-                        "draw": [{"item": "P017", "version": "L", "page": "P017_L"}, ...]}}
+                        "items": ["P017", ...], "versions": ["L", ...], "pages": ["P017_L", ...]}}
 ```
+
+*As implemented:* parallel lists rather than a list of objects, because the flat export turns a
+list into one `;`-joined column and a list of objects into an unreadable one. The record is written
+by the server at submit, from `bank_draws`; a `_banks` sent by the client is discarded.
 
 `_assignment_ids` carries `b41` for the draw; `_complete_assignments` marks `bank_draws` completed for
 `b`-prefixed ids, scoped to the survey's banks as pool ids are scoped today.
@@ -193,7 +197,9 @@ A section **Item banks** on the Randomization page, under the pools:
 
 - **Create**: name, `k`, order, arm variable; items from the naming helper (preview table: item ×
   versions, with unmatched pages listed) or pasted JSON; arms as rows of version quotas, with the sum
-  checked against `k` as it is typed.
+  checked against `k` as it is typed. *As implemented:* items and arms are JSON fields; the sum of
+  each quota is checked in the browser as it is typed, and the server refuses at save with the
+  reasons and the typed values kept.
 - **Status**: per arm, completed and in-flight draws. Per item, exposure. Per item×version, counts, with
   the largest imbalance highlighted. A line that answers "is it balanced?" in one sentence.
 - **Reset** and **Delete**, with the same confirmations pools have.
