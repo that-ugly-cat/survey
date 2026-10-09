@@ -59,6 +59,10 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PANEL_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
 PANEL_PARAM_RE = re.compile(r"^[A-Za-z0-9_\-]{1,32}$")
 PANEL_OUTCOMES = ("complete", "screenout", "quotafull")
+# Link tags: named query parameters an owner allows on the public link, recorded
+# with the response (e.g. ?channel=signatories). Same charset as a panel token.
+URL_TAG_VALUE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+MAX_URL_TAGS = 5
 
 # An assignment issued but not yet submitted still counts toward balancing for
 # this long, which keeps concurrent starts from piling onto the same arm without
@@ -243,6 +247,10 @@ def init_db():
                 "panel_screenout_url", "panel_quotafull_url"):
         if col not in survey_cols:
             db.execute(f"ALTER TABLE surveys ADD COLUMN {col} TEXT NULL")
+
+    # link tags allowed on the public URL, comma-separated parameter names (additive)
+    if "url_tags" not in survey_cols:
+        db.execute("ALTER TABLE surveys ADD COLUMN url_tags TEXT NULL")
 
     # panel token on each response, unique per survey so a token cannot be
     # spent twice. SQLite treats NULLs as distinct, so non-panel surveys are
@@ -709,6 +717,29 @@ def _panel_redirect(config: dict, outcome: str, token: str | None) -> str | None
     return f"{url}{sep}{urllib.parse.quote(config['param'], safe='')}={quoted}"
 
 
+def _url_tag_names(row) -> list:
+    """The parameter names an owner allows as link tags, in the order configured."""
+    try:
+        raw = row["url_tags"]
+    except (IndexError, KeyError):
+        return []
+    return [n for n in (raw or "").split(",") if n]
+
+
+def _read_url_tags(params, names) -> dict:
+    """Tags from a query string or a submitted payload: only configured names, matched
+    case-insensitively and keyed by the configured spelling; a value outside the safe
+    charset is dropped rather than cleaned, so what is stored is what the link said."""
+    wanted = {n.lower(): n for n in names}
+    out = {}
+    for key, value in (params or {}).items():
+        name = wanted.get(str(key).lower())
+        value = str(value or "").strip()
+        if name and name not in out and URL_TAG_VALUE_RE.match(value):
+            out[name] = value
+    return out
+
+
 # --- public routes ---
 
 @app.get("/guide", response_class=HTMLResponse)
@@ -871,6 +902,7 @@ async def survey_page(request: Request, slug: str):
             conditions[cfg["arm_var"]] = got["arm"]
     assigned_pages = assigned_pages_list or None
     pool_pages = pool_pages_list or None
+    url_tags = _read_url_tags(request.query_params, _url_tag_names(row))
     db.close()
 
     return templates.TemplateResponse(request, "survey.html", {
@@ -883,6 +915,7 @@ async def survey_page(request: Request, slug: str):
         "conditions": conditions,
         "page_orders": page_orders,
         "panel_token": panel_token,
+        "url_tags": url_tags,
         # All four languages go down with the page: the notice follows the
         # language switcher, which changes the form without a reload.
         "notice": notice_text.NOTICE,
@@ -914,6 +947,14 @@ async def submit(slug: str, request: Request):
     # What the item banks showed this person comes from the server's ledger, never
     # from the payload: a client-supplied _banks is discarded.
     data.pop("_banks", None)
+    # Link tags travel with the browser (the page has no session to keep them in), so
+    # they are re-checked here against the survey's own list. They record which link a
+    # person came through, not who they are: anyone can edit a query string.
+    tags = _read_url_tags(data.pop("_url", None) if isinstance(data.get("_url"), dict) else {},
+                          _url_tag_names(row))
+    data.pop("_url", None)
+    if tags:
+        data["_url"] = tags
     shown = _bank_records(db, row["id"], data.get("_assignment_ids"))
     if shown:
         data["_banks"] = shown
@@ -1108,6 +1149,9 @@ async def manage_survey(slug: str, request: Request):
 
     panel = _panel_config(row) or {}
     return templates.TemplateResponse(request, "manage.html", {
+        "url_tags": _url_tag_names(row),
+        "url_tags_error": request.query_params.get("tags_error", ""),
+        "url_tags_saved": request.query_params.get("tags_saved") == "1",
         "user": user,
         "slug": slug,
         "title": row["title"],
@@ -1185,6 +1229,38 @@ async def save_panel_config(
     db.commit()
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}?panel_saved=1", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/url-tags")
+async def save_url_tags(slug: str, request: Request, names: str = Form("")):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    wanted = []
+    for n in names.replace(" ", ",").split(","):
+        if n and n.lower() not in {w.lower() for w in wanted}:
+            wanted.append(n)
+    bad = [n for n in wanted if not PANEL_PARAM_RE.match(n)]
+    panel_param = (row["panel_token_param"] or "").lower()
+    message = (
+        "Tag names must be 1 to 32 letters, digits, hyphens or underscores." if bad else
+        f"At most {MAX_URL_TAGS} tags." if len(wanted) > MAX_URL_TAGS else
+        "That name is the panel token parameter." if panel_param in {w.lower() for w in wanted} else
+        "'preview' is reserved." if "preview" in {w.lower() for w in wanted} else "")
+    if message:
+        db.close()
+        return RedirectResponse(f"/admin/surveys/{slug}?tags_error={urllib.parse.quote(message)}",
+                                status_code=302)
+    db.execute("UPDATE surveys SET url_tags = ? WHERE id = ?", (",".join(wanted) or None, row["id"]))
+    db.commit()
+    db.close()
+    return RedirectResponse(f"/admin/surveys/{slug}?tags_saved=1", status_code=302)
 
 
 # --- results ---
@@ -2258,7 +2334,7 @@ def _get_responses(db, slug: str):
     if not row:
         return None
     return db.execute(
-        "SELECT response_json, submitted_at FROM responses WHERE survey_id = ? ORDER BY submitted_at",
+        "SELECT id, response_json, submitted_at FROM responses WHERE survey_id = ? ORDER BY submitted_at",
         (row["id"],),
     ).fetchall()
 
@@ -2271,7 +2347,9 @@ def _flat_table(rows):
     all_keys: list[str] = []
     seen_keys: set[str] = set()
     for r in rows:
-        flat = _flatten(json.loads(r["response_json"]))
+        # the response id comes first: it is the key the long export uses, so the two
+        # tables can be joined without matching on timestamps
+        flat = {"_response": r["id"], **_flatten(json.loads(r["response_json"]))}
         flat["_submitted_at"] = r["submitted_at"]
         flat_rows.append(flat)
         for k in flat:
@@ -2459,7 +2537,7 @@ async def export_json(slug: str, request: Request):
         return JSONResponse({"error": "not found"}, status_code=404)
 
     data = [
-        {"submitted_at": r["submitted_at"], "data": json.loads(r["response_json"])}
+        {"response": r["id"], "submitted_at": r["submitted_at"], "data": json.loads(r["response_json"])}
         for r in rows
     ]
     return StreamingResponse(

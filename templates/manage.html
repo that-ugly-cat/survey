@@ -484,6 +484,37 @@
       {% endif %}
     </section>
 
+    <section>
+      <div class="section-head">
+        <h2>Link tags</h2>
+      </div>
+
+      {% if url_tags_saved %}<div class="notice notice-ok">Link tags saved.</div>{% endif %}
+      {% if url_tags_error %}<div class="notice notice-err">{{ url_tags_error }}</div>{% endif %}
+
+      <form method="post" action="/admin/surveys/{{ slug }}/url-tags">
+        <div class="field">
+          <label for="tag_names">Tag names</label>
+          <input id="tag_names" name="names" value="{{ url_tags | join(', ') }}"
+                 placeholder="channel" autocomplete="off">
+          <p class="hint">Query parameters to record with each response, separated by commas, up to five.
+            A link ending in <code>?channel=newsletter</code> stores <code>_url.channel = newsletter</code>,
+            which the exports show as the column <code>_url_channel</code>. Values may hold letters, digits,
+            dots, hyphens and underscores; anything else is dropped. Parameters not listed here are ignored.</p>
+        </div>
+        <button class="btn btn-primary">Save link tags</button>
+      </form>
+
+      {% if url_tags %}
+      <div class="doc">
+        <p><strong>Links, one per channel</strong></p>
+        {% for name in url_tags %}<pre>{{ public_url }}?{{ name }}=<em>[value]</em></pre>{% endfor %}
+        <p>A tag records which link somebody used, not who they are: anyone can change the end of a link.
+          Use it to tell recruitment channels apart, never to admit or exclude people.</p>
+      </div>
+      {% endif %}
+    </section>
+
     <section class="danger">
       <h2>Danger zone</h2>
       <div class="danger-row">

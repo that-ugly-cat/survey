@@ -169,6 +169,7 @@
     var conditions      = {{ conditions | tojson }};
     var page_orders     = {{ page_orders | tojson }};
     var panel_token     = {{ panel_token | tojson }};
+    var url_tags        = {{ url_tags | tojson }};
     var NOTICE          = {{ notice | tojson }};
     var LANGS           = ["en", "de", "fr", "it"];
     // The completion page is rendered by SurveyJS from the schema, so this one
@@ -318,6 +319,8 @@
       // Exposed as {panelToken} so the schema can branch on it if it needs to,
       // and echoed back on submit so the server can build the return URL.
       if (panel_token) survey.setVariable('panelToken', panel_token);
+      // link tags (e.g. ?channel=…), readable in expressions as {url_<name>}
+      Object.keys(url_tags || {}).forEach(function(k) { survey.setVariable('url_' + k, url_tags[k]); });
 
       // --- timing ---
       var t0          = Date.now();   // survey start
@@ -374,6 +377,7 @@
           if (cond) payload._condition = cond;
         }
         if (panel_token) payload._panel_token = panel_token;
+        if (url_tags && Object.keys(url_tags).length) payload._url = url_tags;
 
         options.showSaveInProgress();
         fetch('/s/' + slug + '/submit', {

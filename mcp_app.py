@@ -155,6 +155,8 @@ def get_survey(slug: str) -> dict:
             "summary": {k: v for k, v in flow.summarise(schema).items()
                         if k != "question_names"},
             "pools": _pools(db, row["id"]),
+            # query parameters recorded with each response (see the guide, "Link tags")
+            "url_tags": main._url_tag_names(row),
         }
     finally:
         db.close()

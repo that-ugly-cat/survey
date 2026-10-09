@@ -115,6 +115,8 @@ The specification, with the allocation algorithm and its guarantees, is `docs/it
 
 With panel mode on, anyone arriving without a valid token is stopped before the questionnaire and sent to the screenout URL, so a respondent nobody can credit does not spend ten minutes answering. Append `?preview=1` while signed in as the owner to walk it yourself; preview submissions are stored, but never bounce to the provider. A token that already produced a response can neither re-enter nor submit again, enforced by a database uniqueness constraint rather than a check before the insert, so two simultaneous submissions cannot both slip through. The questionnaire routes non-completions by setting a field named `_outcome` to `screenout` or `quotafull` with a SurveyJS trigger — a consent gate is the usual case — and the response is stored either way, so refusals stay in your data instead of vanishing.
 
+**Link tags** tell recruitment channels apart on an open link. On the manage page, list up to five parameter names, for instance `channel`; then hand out one link per channel, such as `…/s/{slug}?channel=newsletter` and `…/s/{slug}?channel=conference`. The value is stored with the response as `_url.channel`, which the CSV and Excel exports show as the column `_url_channel`, and the questionnaire can read it in expressions as `{url_channel}`. Names are matched case-insensitively; values may hold letters, digits, dots, hyphens and underscores, and anything else is dropped rather than cleaned, so what is stored is what the link said. Parameters not on the list are ignored. A tag records which link somebody used, not who they are, since anyone can edit the end of a link: use it to describe where responses came from, never to admit or exclude people. That is what panel mode is for.
+
 ## 7. What the participant walks through
 
 One page at a time, with a progress bar, in the language the bar offers. Pool pages that were not drawn are hidden before the model is built, so the participant never sees a gap.
@@ -131,20 +133,22 @@ One known rough edge, worth designing around: the progress bar counts pages by t
 
 The manage page shows the response count and the last submission. Three export formats, all from the same rows:
 
-- **CSV** — one row per response, flat. Nested objects become `parent_key` columns, lists become semicolon-separated strings. Column order follows first appearance; `_submitted_at` goes last.
+- **CSV** — one row per response, flat. Nested objects become `parent_key` columns, lists become semicolon-separated strings. The response id `_response` comes first, then columns in order of first appearance; `_submitted_at` goes last.
 - **Excel** — the same columns, guaranteed, plus a frozen bold header, autofilter, and native number types (a 1–5 scale arrives summable). Strings starting with `=` are forced to text, so an open-ended answer cannot execute as a formula on the analyst's machine.
-- **JSON** — the untouched payloads, each with its `submitted_at`. Use this when the flattening loses something you need.
+- **JSON** — the untouched payloads, each with its `response` id and `submitted_at`. Use this when the flattening loses something you need.
 
 Alongside your own question names, each response carries the platform's own keys:
 
 | Key | Content |
 |---|---|
+| `_response` | The response id, the same number as the `response` column of the item-bank long export, so the two tables join on it |
 | `_submitted_at` | Server timestamp of the submission |
 | `_timing` | Total seconds, and seconds per page |
 | `_conditions` | The condition variables assigned, e.g. `{"condition": "B"}` |
 | `_assignment` | The pool pages actually drawn |
 | `_assignment_ids` | Internal ids of the assignments this response completed |
 | `_panel_token` | The provider's respondent id, in panel mode only |
+| `_url` | Link tags, e.g. `{"channel": "newsletter"}`, when the survey has some configured |
 | `_outcome` | `complete`, `screenout` or `quotafull`, when the schema sets it |
 
 Older surveys, configured before pools could name their own variable, carry `_condition` as a plain string instead of `_conditions`.
