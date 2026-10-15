@@ -168,6 +168,7 @@
     var assignment_ids  = {{ assignment_ids | tojson }};
     var conditions      = {{ conditions | tojson }};
     var page_orders     = {{ page_orders | tojson }};
+    var deferred_banks  = {{ deferred_banks | tojson }};
     var panel_token     = {{ panel_token | tojson }};
     var url_tags        = {{ url_tags | tojson }};
     var NOTICE          = {{ notice | tojson }};
@@ -297,6 +298,41 @@
           if (pool_pages.indexOf(page.name) !== -1 && assigned_pages.indexOf(page.name) === -1) {
             page.visible = false;
           }
+        });
+      }
+
+      // --- banks whose arm comes from the answers ---
+      // The server drew one sequence per arm. Until the answer named by arm_from is
+      // given, none of the bank's pages show; once it is, the pages of that arm show,
+      // in the drawn order, in the slots the bank's pages occupy. Changing the answer
+      // re-applies, so going back and correcting it is safe.
+      function applyDeferred(db) {
+        var value = survey.getValue(db.arm_from);
+        if (value === undefined || value === null) value = survey.getVariable(db.arm_from);
+        var chosen = (value !== undefined && value !== null) ? db.draws[String(value)] : null;
+        db.pages.forEach(function(name) {
+          var page = survey.getPageByName(name);
+          if (page) page.visible = !!chosen && chosen.indexOf(name) !== -1;
+        });
+        if (!chosen) return;
+        if (db.arm_var) survey.setVariable(db.arm_var, String(value));
+        var slots = chosen.map(function(name) {
+          return survey.pages.indexOf(survey.getPageByName(name));
+        }).filter(function(i) { return i >= 0; }).sort(function(a, b) { return a - b; });
+        var moved = chosen.map(function(name) { return survey.getPageByName(name); })
+                          .filter(function(p) { return !!p; });
+        var current = slots.map(function(i) { return survey.pages[i]; });
+        var same = current.every(function(p, k) { return p === moved[k]; });
+        if (same) return;
+        moved.forEach(function(p) { survey.removePage(p); });
+        slots.forEach(function(slot, k) { survey.addPage(moved[k], slot); });
+      }
+      if (deferred_banks && deferred_banks.length) {
+        var applyAll = function() { deferred_banks.forEach(applyDeferred); };
+        applyAll();
+        survey.onValueChanged.add(applyAll);
+        survey.onVariableChanged.add(function(sender, options) {
+          if (deferred_banks.some(function(db) { return db.arm_from === options.name; })) applyAll();
         });
       }
 

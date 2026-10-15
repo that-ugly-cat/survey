@@ -289,7 +289,14 @@ def bank_findings(schema: dict, pools: list, bank_cfgs: list, index: int) -> tup
         {q.get("name") for _, q in all_questions(schema)},
         {p.get("condition_var") for p in pools if p.get("condition_var")}
         | {b["arm_var"] for i, b in enumerate(bank_cfgs) if i != index and b.get("arm_var")},
-        {p.get("name"): p for p in pages})
+        {p.get("name"): p for p in pages},
+        calculated_values(schema))
+
+
+def calculated_values(schema: dict) -> dict:
+    """The schema's calculated values, name -> whether they are saved with the answers."""
+    return {c.get("name"): bool(c.get("includeIntoResult"))
+            for c in (schema.get("calculatedValues") or []) if isinstance(c, dict) and c.get("name")}
 
 
 def preview(schema: dict, pools: list, answers: dict = None, bank_cfgs: list = ()) -> list:
@@ -415,6 +422,7 @@ def validate(schema: dict, pools: list = (), bank_cfgs: list = ()) -> list:
 
     known = set(q_names) | {p.get("condition_var") for p in pools if p.get("condition_var")}
     known |= {b["arm_var"] for b in bank_cfgs if b.get("arm_var")}
+    known |= set(calculated_values(schema))
     known |= {"panelToken"}
     for page_index, page in enumerate(pages):
         targets = [(page.get("visibleIf"), page.get("name"), page_index)]

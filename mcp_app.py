@@ -463,8 +463,11 @@ def set_bank(slug: str, config: dict, bank_id: int = None) -> dict:
 
     config: {"name", "items": [{"item": "P001", "versions": {"H": "P001_H", ...}}],
     "show_count", "arm_var", "arms": [{"name": "LLM30", "quota": {"H": 7, "L": 3}}],
-    "order": "random" | "fixed"}. Each version is a page of the schema; a page belongs
-    to one bank at most and never to a pool. Each arm's quota sums to show_count.
+    "order": "random" | "fixed", "arm_from": optional}. Each version is a page of the
+    schema; a page belongs to one bank at most and never to a pool. Each arm's quota sums
+    to show_count. arm_from names a question, or a calculated value saved with the result,
+    whose value picks the arm instead of the balancing (rotations across waves): every
+    arm's sequence is drawn at the page load and the answer chooses one.
 
     Refused with the reasons when it would not work; saved with warnings when it would
     work badly. Saving resets this bank's draws, as saving a pool resets its counters.

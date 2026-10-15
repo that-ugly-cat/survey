@@ -40,6 +40,9 @@ def normalise(raw) -> dict:
                   for i in (cfg.get("items") or []) if isinstance(i, dict)],
         "show_count": int(cfg.get("show_count") or 1),
         "arm_var": (str(cfg.get("arm_var") or "").strip() or None),
+        # The arm can come from the answers instead of the balancing: the name of a
+        # question or calculated value whose value is an arm name (section 15 of the spec).
+        "arm_from": (str(cfg.get("arm_from") or "").strip() or None),
         "arms": [{"name": str(a.get("name")), "quota": {str(k): int(v) for k, v in
                                                         (a.get("quota") or {}).items()}}
                  for a in (cfg.get("arms") or []) if isinstance(a, dict)],
@@ -77,11 +80,12 @@ def pool_combinations(n: int, k: int) -> int:
 # --- validation ----------------------------------------------------------------------
 
 def validate(cfg: dict, page_names: list, other_taken: dict, question_names: set,
-             pool_vars: set, pages_by_name: dict = None) -> tuple[list, list]:
+             pool_vars: set, pages_by_name: dict = None, calculated: dict = None) -> tuple[list, list]:
     """(errors, warnings) for one bank against its survey.
 
     other_taken: page name -> where it already belongs ("pool X", "bank Y").
     pages_by_name: the schema's pages, for the warnings that look inside them.
+    calculated: the schema's calculated values, name -> whether it is saved with the answers.
     """
     errors, warnings = [], []
     names = set(page_names)
@@ -150,6 +154,28 @@ def validate(cfg: dict, page_names: list, other_taken: dict, question_names: set
             warnings.append(f"{len(short)} item(s) lack a version the arms use and will be drawn less often: "
                             + ", ".join(short[:10]) + ("…" if len(short) > 10 else ""))
 
+    if cfg.get("arm_from"):
+        src = cfg["arm_from"]
+        calculated = calculated or {}
+        if not cfg["arms"]:
+            errors.append("arm_from is set but the bank has no arms to choose from")
+        if src == cfg["arm_var"]:
+            errors.append(f"arm_from and arm_var are both {src!r}: the arm needs a variable of its own")
+        if src in calculated:
+            if not calculated[src]:
+                errors.append(f"calculated value {src!r} is not saved with the answers "
+                              f"(includeIntoResult): the server could not tell which arm was shown")
+        elif src not in question_names:
+            errors.append(f"arm_from {src!r} is neither a question nor a calculated value of the schema")
+        elif pages_by_name is not None:
+            first_bank = min((i for i, p in enumerate(page_names) if p in seen_pages), default=None)
+            where = _asking_page(pages_by_name, page_names, src)
+            if first_bank is not None and where is not None and where >= first_bank:
+                errors.append(f"arm_from {src!r} is answered on or after the first page of the bank: "
+                              f"the arm would be decided after its pages are due")
+        warnings.append("the arm comes from the answers (arm_from), so arms are not balanced: "
+                        "their sizes follow the answers")
+
     if pages_by_name:
         for page in seen_pages:
             p = pages_by_name.get(page) or {}
@@ -162,6 +188,14 @@ def validate(cfg: dict, page_names: list, other_taken: dict, question_names: set
                     warnings.append(f"question {qn!r} on bank page {page!r} does not start with "
                                     f"'{page}_': the long export cannot line it up with the other versions")
     return errors, warnings
+
+
+def _asking_page(pages_by_name: dict, page_names: list, name: str):
+    """Index of the page that asks question `name`, or None."""
+    for i, page in enumerate(page_names):
+        if any(q.get("name") == name for q in _questions(pages_by_name.get(page) or {})):
+            return i
+    return None
 
 
 def _questions(page: dict) -> list:
@@ -189,9 +223,12 @@ def loads(db, bank_id: int, pending_minutes: int) -> tuple[dict, dict, dict]:
         (bank_id,)).fetchall()
     arm_load, item_load, iv_load = {}, {}, {}
     for r in rows:
+        draw = json.loads(r["draw_json"])
+        if isinstance(draw, dict):
+            continue  # a deferred draw not yet resolved: which arm it showed is unknown
         if r["arm"] is not None:
             arm_load[r["arm"]] = arm_load.get(r["arm"], 0) + 1
-        for d in json.loads(r["draw_json"]):
+        for d in draw:
             item_load[d["item"]] = item_load.get(d["item"], 0) + 1
             key = (d["item"], d["version"])
             iv_load[key] = iv_load.get(key, 0) + 1
@@ -309,15 +346,36 @@ def allocate(cfg: dict, arm_load: dict, item_load: dict, iv_load: dict,
     return arm, draw
 
 
+def allocate_deferred(cfg: dict, arm_load: dict, item_load: dict, iv_load: dict,
+                      rng: random.Random = random) -> dict:
+    """For a bank whose arm comes from the answers: one draw per arm, {arm: draw}. The
+    participant has not answered yet, so every arm gets its draw now and the answer picks
+    one of them; nothing outside these draws can ever be shown."""
+    out = {}
+    for arm in cfg["arms"]:
+        _, draw = allocate(dict(cfg, arms=[arm]), {}, item_load, iv_load, rng=rng)
+        out[arm["name"]] = draw
+    return out
+
+
 def assign(db, bank_id: int, cfg: dict, pending_minutes: int, rng: random.Random = random) -> dict:
     """Draw for one participant and record it as pending. One IMMEDIATE transaction, so
-    two arrivals cannot read the same loads and take the same least-used items."""
+    two arrivals cannot read the same loads and take the same least-used items.
+
+    With arm_from the draw is one per arm ({"by_arm": ...}) and the arm stays empty until
+    the submit resolves it from the answers (resolve, below)."""
     db.commit()  # close any implicit transaction before taking the write lock
     db.execute("BEGIN IMMEDIATE")
     try:
-        arm, draw = allocate(cfg, *loads(db, bank_id, pending_minutes), rng=rng)
+        if cfg.get("arm_from"):
+            arm, draw = None, None
+            by_arm = allocate_deferred(cfg, *loads(db, bank_id, pending_minutes), rng=rng)
+            stored = {"by_arm": by_arm}
+        else:
+            arm, draw = allocate(cfg, *loads(db, bank_id, pending_minutes), rng=rng)
+            by_arm, stored = None, draw
         cur = db.execute("INSERT INTO bank_draws (bank_id, arm, draw_json) VALUES (?, ?, ?)",
-                         (bank_id, arm, json.dumps(draw)))
+                         (bank_id, arm, json.dumps(stored)))
         # housekeeping, as for pools: a pending draw older than a week will never complete
         db.execute("DELETE FROM bank_draws WHERE bank_id = ? AND completed = 0 "
                    "AND issued_at < datetime('now', '-7 days')", (bank_id,))
@@ -325,7 +383,26 @@ def assign(db, bank_id: int, cfg: dict, pending_minutes: int, rng: random.Random
     except Exception:
         db.rollback()
         raise
-    return {"draw_id": cur.lastrowid, "arm": arm, "draw": draw}
+    return {"draw_id": cur.lastrowid, "arm": arm, "draw": draw, "by_arm": by_arm}
+
+
+def resolve(db, draw_id: int, arm) -> bool:
+    """Fix a deferred draw to the arm the answers chose: the draw keeps only that arm's
+    pages, as if it had been drawn alone. An arm the draw does not have resolves nothing,
+    so the response records no bank rather than one it was not shown. Returns whether the
+    draw is now resolved (a draw that never was deferred counts as resolved)."""
+    row = db.execute("SELECT draw_json FROM bank_draws WHERE id = ?", (draw_id,)).fetchone()
+    if not row:
+        return False
+    stored = json.loads(row["draw_json"])
+    if not isinstance(stored, dict):
+        return True
+    draw = (stored.get("by_arm") or {}).get(str(arm)) if arm is not None else None
+    if draw is None:
+        return False
+    db.execute("UPDATE bank_draws SET arm = ?, draw_json = ? WHERE id = ?",
+               (str(arm), json.dumps(draw), draw_id))
+    return True
 
 
 def example_draw(cfg: dict) -> dict:
@@ -365,6 +442,8 @@ def status(db, bank_id: int, cfg: dict, pending_minutes: int) -> dict:
     iv = {(it["item"], lb): 0 for it in cfg["items"] for lb in it["versions"]}
     completed = 0
     for r in rows:
+        if isinstance(json.loads(r["draw_json"]), dict):
+            continue  # deferred and never resolved: nothing is on record as shown
         if r["completed"]:
             completed += 1
             if r["arm"] in arms:

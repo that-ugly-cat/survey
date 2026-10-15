@@ -386,6 +386,11 @@
         <input type="text" name="arm_var" value="{{ bank.cfg.arm_var or '' }}" placeholder="e.g. arm" class="cond-input">
 
         <div class="field-label" style="margin-top:0.75rem;">
+          Arm from an answer <span class="hint-inline">(optional: a question or calculated value whose answer names the arm; arms are then not balanced)</span>
+        </div>
+        <input type="text" name="arm_from" value="{{ bank.cfg.arm_from or '' }}" placeholder="e.g. form" class="cond-input">
+
+        <div class="field-label" style="margin-top:0.75rem;">
           Arms <span class="hint-inline">(optional JSON: each arm's quota of versions; each quota sums to Show)</span>
         </div>
         <textarea name="arms_json" rows="5" class="cond-textarea bank-arms" id="arms-{{ bank.id }}" data-bank="{{ bank.id }}"

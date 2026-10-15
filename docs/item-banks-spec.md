@@ -265,7 +265,7 @@ reason.
 
 ## 13. Out of scope
 
-- Adaptive draws that depend on earlier answers.
+- Adaptive draws that depend on earlier answers, beyond choosing the arm (section 15).
 - Weighted arms (unequal allocation ratios). Pools do not have them either; when needed, they belong to
   both.
 - Within-item version comparison by the same participant. A bank never shows two versions of one item
@@ -280,3 +280,66 @@ three arms the version slots are even (7+5+3 = 15 of each), so the global H/L sp
 arms are. The schema has 160 version pages plus the common
 ones; each version page carries the passage, the code list with definitions, `P0xx_V_quality` (1–7)
 and `P0xx_V_prov` (six points).
+
+## 15. The arm from the answers (`arm_from`)
+
+*Added 15 October 2026 for a longitudinal design: three parallel forms rotated across three waves, so
+that each participant sees a different form at each wave without anyone keeping a list of who got
+which.*
+
+### The problem
+
+Arms are drawn at the page load, balanced across arrivals. A rotation needs the arm to follow the
+person: form 1 at the first wave means form 2 at the second. The only thing that follows a person in a
+pseudonymous study is something they answer, typically a self-generated code, and the page load comes
+before any answer.
+
+### The design
+
+`arm_from` names a question, or a calculated value of the schema, whose value is an arm name. With it:
+
+1. **At the page load** the bank draws one sequence **per arm** (`allocate_deferred`): for each arm,
+   the items and versions its quota calls for, in an order, as an ordinary draw would. They are stored
+   together in the ledger (`draw_json = {"by_arm": {arm: draw}}`) with the arm left empty. All of the
+   bank's pages are pooled and none is assigned, so nothing shows yet.
+2. **In the browser**, as soon as the answer named by `arm_from` is known, the pages of that arm
+   show, in the drawn order, in the slots the bank's pages occupy; the other arms' pages stay hidden.
+   Changing the answer reapplies, so a participant who goes back and corrects it walks the right
+   sequence.
+3. **At the submit** the server reads the arm from the stored answers (the question, or the
+   calculated value saved with the result) and resolves the draw to that arm: the ledger keeps that
+   arm's sequence only, and the response records it as for any other draw. The browser never states
+   what it showed; and only an arm the server drew for this person can be chosen. An answer that names
+   no arm resolves nothing, and the response records no bank rather than a guess.
+
+A rotation then lives in the schema. With a day of birth `day` and one survey per wave:
+
+```json
+"calculatedValues": [{
+  "name": "form", "includeIntoResult": true,
+  "expression": "iif(({day} + 2) % 3 = 0, 'F1', iif(({day} + 2) % 3 = 1, 'F2', 'F3'))"
+}]
+```
+
+where the constant (here 2) is the wave number. A pool cannot take its condition this way; a form that
+is a single page is a bank with one item and one version per arm.
+
+### What it gives up
+
+- **Balance.** The arms are as large as the answers make them. A day of birth splits three ways almost
+  evenly (days 29–31 are rarer); other sources may not. Save warns about it.
+- **Items within an arm** are still balanced, from the resolved draws only: an unresolved draw does
+  not count, because which arm it showed is unknown.
+
+### Validation
+
+`arm_from` requires arms; it cannot equal `arm_var`; it must be a question or a calculated value of the
+schema; a calculated value must be saved with the answers (`includeIntoResult`), or the server could
+not read it; a question must be asked before the first page of the bank.
+
+### Tests
+
+`test_arm_from.py`: validation, one draw per arm, the page load, the resolution at submit, an answer
+naming no arm, loads and status counting resolved draws only, the admin form keeping the field, and an
+ordinary bank unchanged. The browser side (showing, reordering, reapplying after a correction) was
+checked by hand on a local server.

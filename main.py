@@ -650,6 +650,26 @@ def _bank_draw_ids(ids) -> list:
     return [int(str(i)[1:]) for i in (ids or []) if re.fullmatch(r"b\d+", str(i))][:10]
 
 
+def _resolve_deferred(db, survey_id: int, data: dict) -> None:
+    """Pick, for each deferred draw of this response, the arm its answers name. The
+    arm is read from the answers the server stores (a question, or a calculated value
+    saved with the result), never from a separate claim by the browser, and only an arm
+    the server itself drew for this person can be chosen."""
+    draws = _bank_draw_ids(data.get("_assignment_ids"))
+    if not draws:
+        return
+    placeholders = ",".join("?" * len(draws))
+    rows = db.execute(
+        f"""SELECT d.id, b.config_json FROM bank_draws d JOIN item_banks b ON b.id = d.bank_id
+            WHERE d.id IN ({placeholders}) AND b.survey_id = ?""", (*draws, survey_id)).fetchall()
+    for r in rows:
+        cfg = banks.normalise(r["config_json"])
+        if cfg["arm_from"]:
+            value = data.get(cfg["arm_from"])
+            if banks.resolve(db, r["id"], value) and cfg["arm_var"]:
+                data[cfg["arm_var"]] = value
+
+
 def _bank_records(db, survey_id: int, ids) -> dict:
     """What each bank showed this response, read from the server's own ledger. The
     client sends only the draw ids; it never gets to say what it was shown."""
@@ -662,9 +682,10 @@ def _bank_records(db, survey_id: int, ids) -> dict:
             JOIN item_banks b ON b.id = d.bank_id
             WHERE d.id IN ({placeholders}) AND b.survey_id = ?""",
         (*draws, survey_id)).fetchall()
+    # a deferred draw the answers did not resolve showed nothing on record
     return {r["bank_name"]: banks.response_record(r["bank_name"], r["id"], r["arm"],
                                                   json.loads(r["draw_json"]))
-            for r in rows}
+            for r in rows if isinstance(json.loads(r["draw_json"]), list)}
 
 
 # --- panel recruitment helpers ---
@@ -838,6 +859,7 @@ async def survey_page(request: Request, slug: str):
     assignment_ids: list = []
     conditions: dict = {}
     page_orders: list = []
+    deferred_banks: list = []
     pools = db.execute(
         "SELECT id, pool_pages, show_count, condition_var, condition_map, page_order "
         "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
@@ -894,6 +916,16 @@ async def survey_page(request: Request, slug: str):
             continue
         got = banks.assign(db, b["id"], cfg, PENDING_ASSIGNMENT_MINUTES)
         pool_pages_list.extend(banks.bank_pages(cfg))
+        if got["by_arm"] is not None:
+            # the arm comes from the answers: every arm's draw goes down, the browser
+            # shows the one the answer names, and the submit records that one only
+            assignment_ids.append(f"b{got['draw_id']}")
+            deferred_banks.append({
+                "arm_from": cfg["arm_from"], "arm_var": cfg["arm_var"],
+                "pages": banks.bank_pages(cfg),
+                "draws": {arm: [d["page"] for d in draw] for arm, draw in got["by_arm"].items()},
+            })
+            continue
         drawn = [d["page"] for d in got["draw"]]
         assigned_pages_list.extend(drawn)
         assignment_ids.append(f"b{got['draw_id']}")
@@ -914,6 +946,7 @@ async def survey_page(request: Request, slug: str):
         "assignment_ids": assignment_ids,
         "conditions": conditions,
         "page_orders": page_orders,
+        "deferred_banks": deferred_banks,
         "panel_token": panel_token,
         "url_tags": url_tags,
         # All four languages go down with the page: the notice follows the
@@ -955,6 +988,7 @@ async def submit(slug: str, request: Request):
     data.pop("_url", None)
     if tags:
         data["_url"] = tags
+    _resolve_deferred(db, row["id"], data)
     shown = _bank_records(db, row["id"], data.get("_assignment_ids"))
     if shown:
         data["_banks"] = shown
@@ -2147,8 +2181,8 @@ async def save_bank(slug: str, bank_id: int, request: Request):
         db.close()
         return RedirectResponse("/admin", status_code=302)
     form = await request.form()
-    typed = {k: form.get(k, "") for k in ("bank_name", "show_count", "arm_var", "order",
-                                          "items_json", "arms_json")}
+    typed = {k: form.get(k, "") for k in ("bank_name", "show_count", "arm_var", "arm_from",
+                                          "order", "items_json", "arms_json")}
 
     def refuse(message: str):
         """The page back, with the reason and with what was typed: nothing is written."""
@@ -2157,7 +2191,8 @@ async def save_bank(slug: str, bank_id: int, request: Request):
         for bank in context["banks"]:
             if bank["id"] == bank_id:
                 bank["cfg"] = {**bank["cfg"], "name": typed["bank_name"],
-                               "arm_var": typed["arm_var"], "order": typed["order"]}
+                               "arm_var": typed["arm_var"], "arm_from": typed["arm_from"],
+                               "order": typed["order"]}
                 bank["typed_show_count"] = typed["show_count"]
                 bank["items_json"] = typed["items_json"]
                 bank["arms_json"] = typed["arms_json"]
@@ -2181,7 +2216,7 @@ async def save_bank(slug: str, bank_id: int, request: Request):
         cfg = banks.normalise({"name": typed["bank_name"], "items": items,
                                "show_count": int(typed["show_count"] or 1),
                                "arm_var": typed["arm_var"], "arms": arms,
-                               "order": typed["order"]})
+                               "arm_from": typed["arm_from"], "order": typed["order"]})
     except (TypeError, ValueError, AttributeError) as exc:
         return refuse(f"The configuration could not be read: {exc}. Nothing was saved.")
     errors, _warnings = bank_save_errors(db, survey, bank_id, cfg)
