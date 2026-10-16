@@ -483,8 +483,11 @@ def _view_categorical(agg, el, block, locale, mine):
     total = agg.get("n") or 0
     chart = block.get("chart") or "bar"
     percent = block.get("value") == "percent"
+    # A radiogroup of consecutive integers is a scale written as choices, and
+    # aggregate.py gives it the same summary a rating gets.
     return ([_cells_payload(cells, labels, chart, percent, total, mine)],
-            [_cells_table(cells, labels, total, strings(locale))], None)
+            [_cells_table(cells, labels, total, strings(locale))],
+            _summary_note(agg, locale))
 
 
 def _view_multi(agg, el, block, locale, mine):
@@ -504,17 +507,24 @@ def _view_binary(agg, el, block, locale, mine):
             [_cells_table(agg.get("cells") or [], labels, total, strings(locale))], None)
 
 
+def _summary_note(agg, locale):
+    """Mean, median and SD under a chart, when the aggregate has them."""
+    t = strings(locale)
+    s = agg.get("summary") or {}
+    if not s.get("n"):
+        return None
+    note = f"{t['mean']} {s['mean']}, {t['median']} {s['median']}"
+    if s.get("sd") is not None:
+        note += f", {t['sd']} {s['sd']}"
+    return note
+
+
 def _view_scale(agg, el, block, locale, mine):
     labels = _rate_labels(el, locale)
     total = agg.get("n") or 0
     chart = block.get("chart") or "column"
     t = strings(locale)
-    s = agg.get("summary") or {}
-    note = None
-    if s.get("n"):
-        note = f"{t['mean']} {s['mean']}, {t['median']} {s['median']}"
-        if s.get("sd") is not None:
-            note += f", {t['sd']} {s['sd']}"
+    note = _summary_note(agg, locale)
     return ([_cells_payload(agg.get("cells") or [], labels, chart,
                             block.get("value") == "percent", total, mine)],
             [_cells_table(agg.get("cells") or [], labels, total, t)], note)

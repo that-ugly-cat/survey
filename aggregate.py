@@ -245,10 +245,28 @@ def _other_split(el: dict, name: str, rows: list) -> dict:
     return {"other_texts": [t for t in texts if _answered(t)]}
 
 
+def _is_numeric_scale(order) -> bool:
+    """Choices that are a run of consecutive integers, at least three of them.
+
+    A Likert item is often written as a radiogroup with values 1 to 5 rather than
+    as a rating, and then it has an order and a mean as much as a rating does.
+    Codes for unordered categories are usually words (`18_24`, `donna`); a survey
+    that codes them as 1, 2, 3 gets a mean it should ignore, which is why the
+    rule asks for consecutive integers and nothing looser.
+    """
+    if len(order) < 3 or not all(isinstance(v, int) and not isinstance(v, bool) for v in order):
+        return False
+    return sorted(order) == list(range(min(order), max(order) + 1))
+
+
 def _categorical(el, name, values, rows):
-    return {"shape": "categorical",
-            "cells": _counts(values, _choice_values(el)),
-            **_other_split(el, name, rows)}
+    order = _choice_values(el)
+    out = {"shape": "categorical",
+           "cells": _counts(values, order),
+           **_other_split(el, name, rows)}
+    if _is_numeric_scale(order):
+        out["summary"] = _summary(values)
+    return out
 
 
 def _multi(el, name, values, rows):

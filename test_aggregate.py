@@ -314,6 +314,24 @@ for name, agg in BY_NAME.items():
 show("shapes filtered", sorted({a["shape"] for a in BY_NAME.values()}))
 ok(not broken, "every shape survives every audience filter" + (f" — {broken}" if broken else ""))
 
+print("\n--- a scale written as choices ---")
+likert = {"type": "radiogroup", "name": "l", "choices": [
+    {"value": v, "text": t} for v, t in zip(range(1, 6), "abcde")]}
+agg = aggregate.question(likert, "p", {"pages": [{"name": "p", "elements": [likert]}]}, [],
+                         [{"l": v} for v in (1, 2, 2, 4, 5, 5)])
+print(f"    [summary] {agg.get('summary')}")
+ok(agg.get("summary", {}).get("mean") == 3.167 and agg["summary"]["median"] == 3.0,
+   "a radiogroup of values 1 to 5 gets a mean and a median, like a rating")
+codes = {"type": "radiogroup", "name": "c", "choices": ["18_24", "25_34", "35_44"]}
+agg = aggregate.question(codes, "p", {"pages": [{"name": "p", "elements": [codes]}]}, [],
+                         [{"c": "18_24"}])
+ok("summary" not in agg, "categories coded as words get none")
+gap = {"type": "radiogroup", "name": "g", "choices": [1, 2, 9]}
+two = {"type": "radiogroup", "name": "t", "choices": [0, 1]}
+ok(not aggregate._is_numeric_scale([1, 2, 9]) and not aggregate._is_numeric_scale([0, 1])
+   and not aggregate._is_numeric_scale([True, False, 2]) and aggregate._is_numeric_scale([0, 1, 2]),
+   "and neither do codes with a gap, two options, or booleans")
+
 print("\n--- the assignment as it is stored ---")
 # The browser sends `_assignment` as a comma-separated string. Read as a list it
 # became a set of characters, and every pool page counted as shown to nobody.
