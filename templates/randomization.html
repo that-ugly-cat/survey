@@ -184,6 +184,14 @@
     .be-card b { display: block; font-size: 0.82rem; margin-bottom: 0.2rem; }
     .be-card .hint { margin: 0; }
     .be-why { padding-left: 1.1rem; margin-top: 0.3rem; }
+    .be-dialog { background: #1a1d27; color: #e2e8f0; border: 1px solid #2d3148; border-radius: 12px;
+                 padding: 1.5rem 1.7rem; width: min(820px, 94vw); max-height: 90vh; }
+    .be-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+    .be-dialog h3 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+    .be-dialog .cond-textarea { margin-bottom: 0.4rem; }
+    .be-samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem; margin-top: 0.5rem; }
+    .be-sample { border: 1px solid #2d3148; border-radius: 8px; padding: 0.5rem; }
+    .be-sample-frame { width: 100%; height: 150px; border: 0; background: #fff; border-radius: 6px; }
     .be-rot { margin-top: 0.8rem; }
     .be-rot .be-grid { max-width: 560px; }
     .be-note { border: 1px solid #2d3148; border-left: 3px solid #4a6fa5; border-radius: 6px; padding: 0.55rem 0.75rem;
@@ -528,7 +536,7 @@
       <h3>How item banks work</h3>
 
       <h4>The editor</h4>
-      <p>Each bank opens in a visual editor; <strong>Edit as JSON</strong> shows the same configuration as text, which the editor reads back when you return. Findings come from the server while you edit, and the panel on the right shows an example draw per group. Under <strong>Groups</strong>, <em>Rotation across waves</em> adds to the questionnaire the calculated value that gives each participant the next group at each wave.</p>
+      <p>Each bank opens in a visual editor; <strong>Edit as JSON</strong> shows the same configuration as text, which the editor reads back when you return. Findings come from the server while you edit, and the panel on the right shows an example draw per group. Under <strong>Groups</strong>, <strong>Generate pages from a table</strong> (under Content) writes one version page per row of a pasted table from a template page with <code>{{placeholders}}</code>. <em>Rotation across waves</em> adds to the questionnaire the calculated value that gives each participant the next group at each wave.</p>
 
       <h4>Items and versions</h4>
       <p>An item is a unit of content; a version is one rendering of it, and <strong>each version is a page of the schema</strong>. Each version keeps its own question names, so an answer always lands in a column that says which item and which version it belongs to.</p>

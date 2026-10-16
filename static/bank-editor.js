@@ -362,7 +362,9 @@
     } });
     var search = el("input", { type: "search", class: "cond-input be-search", placeholder: "Search items", value: this.filter,
                                "aria-label": "Search items", oninput: function (e) { self.filter = e.target.value; self.renderGrid(); } });
-    p.appendChild(el("div", { class: "count-row" }, [fill, search]));
+    var gen = el("button", { type: "button", class: "btn-sm btn-secondary", text: "Generate pages from a table…",
+      onclick: function () { self.openGenerator(); } });
+    p.appendChild(el("div", { class: "count-row" }, [gen, fill, search]));
     p.appendChild(el("details", { class: "be-adv" }, [el("summary", { class: "hint", text: "Naming pattern" }), regex]));
     p.appendChild(fillNote);
     p.appendChild(el("p", { class: "hint be-count", text: st.items.length + " item(s) · " + st.labels.length + " version(s) · " +
@@ -445,6 +447,131 @@
     this.gridWrap.textContent = "";
     this.gridWrap.appendChild(el("table", {}, [el("thead", {}, [head]), body]));
     if (!st.items.length) this.gridWrap.appendChild(el("p", { class: "empty-counts", text: "No items yet: fill from the page names, or add them one by one." }));
+  };
+
+  // --- page generator (phase 3) ---------------------------------------------------
+  // A template page with {{placeholders}} and a table with one row per page; the server
+  // (pagegen.py) builds the pages, first as a dry run to show what it would do.
+
+  Editor.prototype.openGenerator = function () {
+    var self = this, o = this.opts, model = o.model;
+    var dlg = el("dialog", { class: "be-dialog", "aria-label": "Generate pages from a table" });
+    // pages with {{placeholders}} first: those are the templates; any free page can serve
+    var free = model.pages.filter(function (pg) { return !pg.owner; });
+    var withPh = free.filter(function (pg) { return (pg.placeholders || []).length; });
+    free = withPh.concat(free.filter(function (pg) { return !(pg.placeholders || []).length; }));
+    var tpl = el("select", { class: "bank-select", "aria-label": "Template page" },
+      free.map(function (pg) {
+        var ph = (pg.placeholders || []).map(function (x) { return "{{" + x + "}}"; }).join(" ");
+        return el("option", { value: pg.name, text: pg.name + (pg.title ? " — " + pg.title : "") + (ph ? "  · " + ph : "  · no placeholders") });
+      }));
+    var table = el("textarea", { class: "cond-textarea", rows: "8", "aria-label": "Table",
+      placeholder: "item\tversion\ttext\nP01\tA\tThe text of P01 in version A…" });
+    var file = el("input", { type: "file", accept: ".csv,.tsv,.txt", "aria-label": "Upload a CSV file",
+      onchange: function (e) {
+        var f = e.target.files[0]; if (!f) return;
+        var reader = new FileReader();
+        reader.onload = function () { table.value = reader.result; stale(); };
+        reader.readAsText(f, "utf-8");
+      } });
+    var remove = el("input", { type: "checkbox", checked: "checked" });
+    var out = el("div", { class: "be-gen-out" });
+    var addBtn = el("button", { type: "button", class: "btn-primary", text: "Add pages", disabled: "disabled" });
+    var previewed = null;
+    function stale() { previewed = null; addBtn.disabled = true; addBtn.textContent = "Add pages"; }
+    tpl.addEventListener("change", stale); table.addEventListener("input", stale);
+    function payload(extra) {
+      return Object.assign({ template: tpl.value, table: table.value, remove_template: remove.checked }, extra || {});
+    }
+    function post(body) {
+      return fetch("/admin/surveys/" + encodeURIComponent(o.slug) + "/generate-pages", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      }).then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); });
+    }
+    function showPlan(d) {
+      out.textContent = "";
+      (d.errors || []).forEach(function (m) { out.appendChild(el("div", { class: "pool-error", text: m })); });
+      (d.notes || []).forEach(function (m) { out.appendChild(el("div", { class: "bank-warning", text: m })); });
+      out.appendChild(el("p", { class: "hint", text: "Placeholders in the template: " +
+        ((d.placeholders || []).map(function (x) { return "{{" + x + "}}"; }).join(", ") || "none") }));
+      if (!d.count) return;
+      var names = d.names.length > 6 ? d.names.slice(0, 5).concat(["…", d.names[d.names.length - 1]]) : d.names;
+      out.appendChild(el("p", { class: "hint", text: d.count + " page(s), " + d.items.length + " item(s): " + names.join(", ") +
+        (remove.checked ? ". The template page will be removed." : ". The template page stays, and every participant would see it.") }));
+      var samples = el("div", { class: "be-samples" });
+      d.sample.forEach(function (page) {
+        var box = el("div", { class: "be-sample" }, [el("div", { class: "field-label", text: page.name })]);
+        (page.elements || []).forEach(function (e) {
+          if (e.type === "html") {
+            // the author's own HTML, shown as the participant would see it, without scripts
+            box.appendChild(el("iframe", { sandbox: "", class: "be-sample-frame", title: e.name,
+              srcdoc: "<body style='margin:0;font-family:system-ui,sans-serif'>" + e.html + "</body>" }));
+          } else {
+            box.appendChild(el("p", { class: "hint", text: (e.title || e.name) + "  [" + e.type + ", " + e.name + "]" }));
+          }
+        });
+        samples.appendChild(box);
+      });
+      out.appendChild(samples);
+    }
+    var previewBtn = el("button", { type: "button", class: "btn-sm btn-secondary", text: "Preview",
+      onclick: function () {
+        out.textContent = "Checking…";
+        post(payload({ dry_run: true })).then(function (res) {
+          showPlan(res.d);
+          if (!(res.d.errors || []).length && res.d.count) {
+            previewed = payload(); addBtn.disabled = false; addBtn.textContent = "Add " + res.d.count + " pages";
+          }
+        }).catch(function () { out.textContent = "The server could not be reached."; });
+      } });
+    function generate(confirmed) {
+      addBtn.disabled = true;
+      post(Object.assign({}, previewed, { confirm: confirmed })).then(function (res) {
+        if (res.status === 409 && res.d.error === "responses_held") {
+          if (confirm("The survey holds " + res.d.held + " response(s): adding pages under them changes the questionnaire they answered. Add the pages anyway?"))
+            return generate(true);
+          addBtn.disabled = false; return;
+        }
+        if (!res.d.ok) { showPlan(res.d); addBtn.disabled = false; return; }
+        Object.keys(res.d.model).forEach(function (k) { model[k] = res.d.model[k]; });
+        self.mergeItems(res.d.items);
+        dlg.close();
+        self.jsonNote.textContent = res.d.count + " page(s) added to the questionnaire" +
+          (res.d.removed_template ? ", template removed" : "") + "; the grid now uses them. Save the bank to keep the bank's part.";
+      }).catch(function () { out.textContent = "The server could not be reached; nothing was added."; addBtn.disabled = false; });
+    }
+    addBtn.addEventListener("click", function () { if (previewed) generate(false); });
+
+    dlg.appendChild(el("h3", { text: "Generate pages from a table" }));
+    dlg.appendChild(el("p", { class: "hint", text: "Each row of the table becomes a page named item_version, a copy of the template with its {{placeholders}} filled from the row's columns. Questions are renamed page_role, the names the long export expects." }));
+    dlg.appendChild(el("div", { class: "field-label", text: "1 · Template page (a page not used by a pool or a bank)" }));
+    dlg.appendChild(free.length ? tpl : el("p", { class: "pool-error", text: "Every page belongs to a pool or a bank: add a template page to the questionnaire first." }));
+    dlg.appendChild(el("div", { class: "field-label", text: "2 · Table: columns item, version, and one per placeholder. Paste from a spreadsheet, or upload a CSV" }));
+    dlg.appendChild(table);
+    dlg.appendChild(file);
+    dlg.appendChild(el("label", { class: "be-radio" }, [remove, " Remove the template page after generating (otherwise every participant sees it)"]));
+    dlg.appendChild(el("div", { class: "count-row" }, [previewBtn]));
+    dlg.appendChild(el("div", { class: "field-label", text: "3 · Preview" }));
+    dlg.appendChild(out);
+    dlg.appendChild(el("div", { class: "pool-actions" }, [addBtn,
+      el("button", { type: "button", class: "btn-sm btn-secondary", text: "Cancel", onclick: function () { dlg.close(); } })]));
+    dlg.addEventListener("close", function () { dlg.remove(); });
+    document.body.appendChild(dlg);
+    dlg.showModal();
+  };
+
+  // Generated items join the grid: an item already there gains the new versions.
+  Editor.prototype.mergeItems = function (items) {
+    var st = this.st;
+    items.forEach(function (gen) {
+      var have = st.items.filter(function (it) { return it.item === gen.item; })[0];
+      if (!have) { have = { item: gen.item, versions: {} }; st.items.push(have); }
+      Object.keys(gen.versions).forEach(function (lb) {
+        have.versions[lb] = gen.versions[lb];
+        if (st.labels.indexOf(lb) === -1) st.labels.push(lb);
+      });
+    });
+    this.render(); this.sync();
   };
 
   // --- tab 2: the draw ------------------------------------------------------------

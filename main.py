@@ -31,6 +31,7 @@ import crypto
 import explore
 import flow
 import notice as notice_text
+import pagegen
 import report as report_model
 import results as results_view
 import review_export
@@ -1963,7 +1964,8 @@ def _bank_editor_model(schema: dict, pools: list, bank_rows: list) -> dict:
     pages, questions = [], []
     for index, page in enumerate(schema.get("pages", [])):
         name = page.get("name") or ""
-        pages.append({"name": name, "title": page.get("title") or "", "owner": owner.get(name)})
+        pages.append({"name": name, "title": page.get("title") or "", "owner": owner.get(name),
+                      "placeholders": pagegen.placeholders(page)})
         for q in flow.questions_of(page):
             questions.append({"name": q.get("name"), "title": q.get("title") or "",
                               "page": index, "type": q.get("type"),
@@ -2354,6 +2356,76 @@ async def add_rotation(slug: str, request: Request):
     return JSONResponse({"ok": True, "expression": expr, "replaced": replaced,
                          "calculated": _calculated_for_editor(new_schema),
                          "shares": rotation.expected_shares(meta, int(params["wave"]), params["arms"])})
+
+
+@app.post("/admin/surveys/{slug}/generate-pages")
+async def generate_pages(slug: str, request: Request):
+    """Version pages from a template page and a table (pagegen.py). With `dry_run` it
+    says what it would do and writes nothing: the problems, the notes, how many pages,
+    and the first few as the participant would get them. Without it, it writes the pages
+    after the template, removes the template if asked, and returns the editor's new model
+    with the items the pages form. Over collected answers it needs `confirm`, like every
+    change to the questionnaire."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not_signed_in"}, status_code=401)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    try:
+        params = await request.json()
+        if not isinstance(params, dict):
+            raise ValueError("not an object")
+    except (json.JSONDecodeError, ValueError):
+        db.close()
+        return JSONResponse({"error": "unreadable_request"}, status_code=400)
+    schema = json.loads(survey["schema_json"])
+    pools = [{"pool_name": r["pool_name"], "pool_pages": json.loads(r["pool_pages"]),
+              "condition_var": r["condition_var"]} for r in db.execute(
+        "SELECT pool_name, pool_pages, condition_var FROM rand_pools WHERE survey_id = ?",
+        (survey["id"],)).fetchall()]
+    bank_rows = _bank_rows(db, survey["id"])
+    taken = {}
+    for pool in pools:
+        for name in pool["pool_pages"]:
+            taken[name] = f"pool {pool['pool_name']}"
+    for _, cfg in bank_rows:
+        for name in banks.bank_pages(cfg):
+            taken[name] = f"bank {cfg['name']}"
+    template = str(params.get("template") or "")
+    result = pagegen.plan(schema, template, str(params.get("table") or ""), taken)
+    summary = {
+        "errors": [m for _, m in result["errors"]], "codes": [c for c, _ in result["errors"]],
+        "notes": result["notes"], "placeholders": result["placeholders"],
+        "count": len(result["pages"]), "names": [p["name"] for p in result["pages"]],
+        "sample": result["pages"][:3], "items": result["items"],
+    }
+    if params.get("dry_run") or result["errors"]:
+        db.close()
+        return JSONResponse(summary, status_code=200 if params.get("dry_run") else 400)
+    if not result["pages"]:
+        db.close()
+        return JSONResponse(dict(summary, error="nothing_to_generate"), status_code=400)
+    held = _response_count(db, survey["id"])
+    if held and not params.get("confirm"):
+        db.close()
+        return JSONResponse({"error": "responses_held", "held": held}, status_code=409)
+    remove = bool(params.get("remove_template"))
+    new_schema = pagegen.apply(schema, template, result["pages"], remove)
+    if held:
+        log.warning("%d generated page(s) written over %d response(s) on %s by user %s",
+                    len(result["pages"]), held, slug, user["id"])
+    db.execute("UPDATE surveys SET schema_json = ? WHERE id = ?",
+               (json.dumps(new_schema, ensure_ascii=False), survey["id"]))
+    db.commit()
+    db.close()
+    _invalidate_results(survey["id"])
+    return JSONResponse({"ok": True, "count": len(result["pages"]), "items": result["items"],
+                         "removed_template": remove,
+                         "model": _bank_editor_model(new_schema, pools, bank_rows)})
 
 
 @app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/reset")

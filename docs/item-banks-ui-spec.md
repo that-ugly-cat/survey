@@ -1,9 +1,18 @@
 # Item banks — a visual editor
 
-*16 October 2026. Status: **phases 1 and 2 implemented** (`static/bank-editor.js`, the check route in `main.py`,
+*16 October 2026. Status: **phases 1, 2 and 3 implemented** (`static/bank-editor.js`, the check route in `main.py`,
 `test_bank_editor.js` under Node and `test_bank_check.py`; phase 2 in `rotation.py`, the rotation route
-and `test_rotation.py`); phases 3–4 designed. Mockup:
+and `test_rotation.py`; phase 3 in `pagegen.py`, the generate-pages route and `test_pagegen.py`); phase 4
+designed. Mockup:
 `docs/mockups/item-banks-ui.html` (static, with just enough script to switch tabs and check sums).*
+
+**Phase 3 departs from the design twice.** The template page, if left in the questionnaire, would be
+shown to every participant with its placeholders unfilled, so the generator offers to remove it, with
+a box ticked by default and the consequence stated beside it; nothing is removed unasked. And the
+table is read by the server (`pagegen.parse_table`: tabs from a spreadsheet paste, commas, or the
+semicolons European spreadsheets export), behind one route with a dry run, so the preview is the
+server's own plan and not a second implementation in the browser. Pages with `{{placeholders}}` are
+offered first as templates.
 
 **Phase 2 departs from the design once, to be narrower.** Instead of a general route that adds any
 calculated value, `POST /admin/surveys/{slug}/randomization/rotation` takes the parameters of a rotation
