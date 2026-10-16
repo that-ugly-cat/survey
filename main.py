@@ -2899,7 +2899,8 @@ async def export_long(slug: str, fmt: str, request: Request):
 async def export_review_docx(slug: str, request: Request):
     """Word rendering of the questionnaire itself (not the responses), for
     circulating to reviewers: primary-language texts, answer formats,
-    visibility logic, randomization pools, and translation coverage flags."""
+    visibility logic, randomization pools and item banks, and translation
+    coverage flags."""
     db = get_db()
     user = auth.current_user(request, db)
     if not user:
@@ -2914,12 +2915,17 @@ async def export_review_docx(slug: str, request: Request):
         "FROM rand_pools WHERE survey_id = ? ORDER BY pool_order",
         (row["id"],),
     ).fetchall()
+    bank_cfgs = [{**banks.normalise(b["config_json"]), "name": b["bank_name"]}
+                 for b in db.execute("SELECT bank_name, config_json FROM item_banks "
+                                     "WHERE survey_id = ? ORDER BY bank_order, id",
+                                     (row["id"],)).fetchall()]
     db.close()
 
     data = review_export.build_review_docx(
         json.loads(row["schema_json"]),
         review_export.pools_from_rows(pool_rows),
         row["title"],
+        bank_cfgs,
     )
     return StreamingResponse(
         io.BytesIO(data),

@@ -179,5 +179,61 @@ paras, _ = render([{"type": "signaturepad", "name": "s", "title": "Sign"}])
 ok(has(paras, "Question type 'signaturepad' not rendered here"),
    "and a type nobody taught it still says so, so the check above means something")
 
+print("\n--- item banks ---")
+
+
+def render_pages(pages, pools=(), banks=()):
+    """Render several pages, with pools and banks beside the schema."""
+    schema = {"title": "T", "pages": pages}
+    doc = Document(io.BytesIO(review_export.build_review_docx(
+        schema, list(pools), "T", list(banks))))
+    return [p.text for p in doc.paragraphs]
+
+
+import banks as bank_lib
+
+pages = [{"name": "intro", "elements": [{"type": "html", "name": "h", "html": "Hi"}]}] + [
+    {"name": f"P{i}_{v}", "elements": [{"type": "text", "name": f"P{i}_{v}_q", "title": "Q"}]}
+    for i in (1, 2, 3) for v in ("H", "L")]
+two_versions = bank_lib.normalise({
+    "name": "passages", "show_count": 2, "order": "random", "arm_var": "arm",
+    "items": [{"item": f"P{i}", "versions": {"H": f"P{i}_H", "L": f"P{i}_L"}} for i in (1, 2, 3)],
+    "arms": [{"name": "mostlyH", "quota": {"H": 2}}, {"name": "even", "quota": {"H": 1, "L": 1}}],
+})
+paras = render_pages(pages, banks=[two_versions])
+show(paras, "bank", ["Item bank", "Randomization"])
+ok("Randomization" in paras, "a bank alone opens the Randomization section")
+ok(has(paras, "Item bank “passages”: shows 2 of 3 items, in a fresh random order"),
+   "the section says how many items of how many, and the order")
+ok(has(paras, "versions “H”, “L”") and has(paras, "“even” (1 H, 1 L)")
+   and has(paras, "stored in the variable “arm”"),
+   "and the versions, the arms with their quotas, and the arm variable")
+ok(has(paras, "▸ Item bank “passages”, item “P2”, version “L”: shown only if drawn. "
+              "Each participant sees 2 of the 3 items"),
+   "each bank page says which item and version it is, and that it is drawn")
+ok(sum("▸ Item bank" in p for p in paras) == 6, "every bank page gets a note, the intro none")
+
+one_version = bank_lib.normalise({
+    "name": "coasters", "show_count": 1, "order": "fixed",
+    "items": [{"item": f"P{i}_H", "versions": {"v": f"P{i}_H"}} for i in (1, 2, 3)],
+})
+paras = render_pages(pages, banks=[one_version])
+show(paras, "single version", ["Item bank"])
+ok(has(paras, "shows 1 of 3 items, in the order they have in this document")
+   and not has(paras, "comes in versions"),
+   "a bank without versions does not talk about versions")
+ok(has(paras, "▸ Item bank “coasters”, item “P1_H”: shown only if drawn. Each participant "
+              "sees 1 of the 3 items in this bank.") and not has(paras, "version “v”"),
+   "and its page notes name the item only, with no claim about position")
+
+follows = bank_lib.normalise({**two_versions, "arm_from": "form"})
+paras = render_pages(pages, banks=[follows])
+ok(has(paras, "The arm is not drawn: it follows the answer to “form”"),
+   "an arm taken from an answer is described as such, not as balanced")
+
+paras = render_pages(pages)
+ok("Randomization" not in paras and not has(paras, "Item bank"),
+   "with no pools and no banks there is still no Randomization section")
+
 print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: " + "; ".join(FAILED)))
 sys.exit(1 if FAILED else 0)

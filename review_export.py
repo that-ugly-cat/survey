@@ -3,7 +3,7 @@
 Produces a Word document showing everything a reviewer needs and nothing a
 participant sees differently: verbatim texts in the primary language, answer
 formats, page/question visibility logic in plain English, randomization pools
-(from the database, not the schema), and per-element flags for which
+(from the database, not the schema), item banks, and per-element flags for which
 translations exist.
 
 Pure module: no FastAPI, no database. The route hands in the parsed schema and
@@ -540,11 +540,75 @@ def _pool_page_note(pool, page_name) -> str:
     return text
 
 
+def _versions_of(bank) -> list:
+    """Every version label the bank uses, in first-seen order."""
+    seen = []
+    for it in bank["items"]:
+        for label in it["versions"]:
+            if label not in seen:
+                seen.append(label)
+    return seen
+
+
+def _bank_summary(bank) -> str:
+    """One bullet's worth of plain English: what a participant gets from this bank."""
+    n, k = len(bank["items"]), bank["show_count"]
+    order = ("in a fresh random order for each participant" if bank["order"] == "random"
+             else "in the order they have in this document")
+    text = (f"shows {k} of {n} items, {order}. Items are drawn so that each one is seen "
+            f"about as often as the others.")
+    labels = _versions_of(bank)
+    if len(labels) > 1:
+        text += (f" Each item comes in versions {', '.join(f'“{l}”' for l in labels)}; a "
+                 f"participant sees one version of each drawn item, and each item's "
+                 f"versions are kept balanced.")
+    if bank["arms"]:
+        arms = "; ".join(
+            f"“{a['name']}” ({', '.join(f'{v} {l}' for l, v in a['quota'].items())})"
+            for a in bank["arms"])
+        if bank["arm_from"]:
+            text += (f" The arm is not drawn: it follows the answer to “{bank['arm_from']}”, "
+                     f"and sets how many items of each version are shown: {arms}.")
+        else:
+            text += (f" Each participant is first assigned an arm, balanced across "
+                     f"participants, which sets how many items of each version are shown: {arms}.")
+        if bank["arm_var"]:
+            text += f" The arm is stored in the variable “{bank['arm_var']}”."
+    return text
+
+
+def _bank_for_page(banks, page_name):
+    """(bank, item key, version label) for a page that is a version in a bank."""
+    for bank in banks:
+        for it in bank["items"]:
+            for label, page in it["versions"].items():
+                if page == page_name:
+                    return bank, it["item"], label
+    return None
+
+
+def _bank_page_note(bank, item, label) -> str:
+    n, k = len(bank["items"]), bank["show_count"]
+    where = f"item “{item}”"
+    if len(_versions_of(bank)) > 1:
+        where += f", version “{label}”"
+    text = (f"Item bank “{bank['name']}”, {where}: shown only if drawn. Each participant "
+            f"sees {k} of the {n} items in this bank")
+    if bank["order"] == "random":
+        text += ", in random order, so the position of this page varies."
+    else:
+        text += "."
+    return text
+
+
 # --- document assembly ---
 
-def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> bytes:
+def build_review_docx(schema: dict, pools: list, survey_title: str = "",
+                      banks: list = ()) -> bytes:
     """Render `schema` (parsed SurveyJS JSON) + `pools` (rand_pools rows as dicts
-    with parsed pool_pages/condition_map) into .docx bytes."""
+    with parsed pool_pages/condition_map) + `banks` (item bank configs as
+    `banks.normalise` returns them) into .docx bytes."""
+    banks = list(banks)
     doc = Document()
     normal = doc.styles["Normal"]
     normal.font.name = "Calibri"
@@ -601,10 +665,11 @@ def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> byte
         p.add_run(lead).bold = True
         p.add_run(rest)
 
-    if pools:
+    if pools or banks:
         doc.add_heading("Randomization", level=1)
         doc.add_paragraph(
-            "Participants are randomly assigned pages from the pools below. "
+            "Participants are randomly assigned pages from the pools and item banks "
+            "below, so nobody sees every page of this document. "
             "Assignment is balanced: the least-used variant is always preferred. "
             "This is configured on the platform, outside the questionnaire schema."
         )
@@ -621,6 +686,10 @@ def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> byte
                     f"{page} → “{cmap.get(page, page)}”" for page in pool["pool_pages"]
                 )
                 p.add_run(f" Sets variable “{pool['condition_var']}”: {mapping}.")
+        for bank in banks:
+            p = doc.add_paragraph(style="List Bullet")
+            p.add_run(f"Item bank “{bank['name']}”: ").bold = True
+            p.add_run(_bank_summary(bank))
 
     for page in pages:
         doc.add_page_break()
@@ -633,6 +702,9 @@ def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> byte
         pool = _pool_for_page(pools, page.get("name", ""))
         if pool:
             _note(doc, _pool_page_note(pool, page["name"]))
+        drawn = _bank_for_page(banks, page.get("name", ""))
+        if drawn:
+            _note(doc, _bank_page_note(*drawn))
         if page.get("description"):
             p = doc.add_paragraph()
             run = p.add_run(loc_text(page["description"]))

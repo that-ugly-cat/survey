@@ -75,7 +75,7 @@ or JSON.
   formula-looking strings to text so open-ended answers can't execute on the analyst's machine.
 - **Questionnaire review export (DOCX)** — renders the survey itself as a Word document for
   circulating to colleagues: primary-language texts, answer formats per question type,
-  branching logic in plain English, the survey's randomization pools, and per-element
+  branching logic in plain English, the survey's randomization pools and item banks, and per-element
   translation coverage flags (present / partial / missing). Every question type SurveyJS
   renders on screen is rendered here too — including the four that are tables of questions
   rather than questions: `ranking`, `imagepicker` (with the file each option points at, so a
