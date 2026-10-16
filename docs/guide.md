@@ -28,6 +28,8 @@ Three things can go wrong at creation and all three say so: no schema supplied, 
 
 New surveys created from the dashboard are **open** immediately. Close one with **Close** and it shows a "not available" page instead of the questionnaire, and its submit route refuses too — so closing is a real gate on the data, not just on the front page. Use it while you are still building.
 
+**Duplicate survey**, under *Questionnaire* on the manage page, starts a new survey from an existing one: give the copy a title and an address. It gets the schema, the pools and item banks (with their balance at zero), the link tags, the report's blocks and the uploaded files, with the schema's references to those files pointed at the copies. It does not get the responses, the panel recruitment settings (each field has its own provider links) or the report's reach: the copy starts **closed**, with its report private to you, so making a copy never opens or publishes anything. This is the way to the next wave of a longitudinal study, where only the wave number changes (§5, *Rotation across waves*), or to a variant of a study.
+
 ## 3. Writing the questionnaire
 
 A schema is an array of **pages**, each with an array of **elements**. Two properties carry most of the weight:
@@ -158,7 +160,7 @@ Alongside your own question names, each response carries the platform's own keys
 
 Older surveys, configured before pools could name their own variable, carry `_condition` as a plain string instead of `_conditions`.
 
-**Purge answers** (danger zone) empties a survey of its responses and of the randomization balance that goes with them, keeping the questionnaire, its files and its pool and item-bank configuration; the item banks' draws go too. The balance goes because leaving it would count arms as completed by respondents who no longer exist. This is the button for clearing your own test run before fielding. **Duplicate survey**, under Questionnaire, copies the instrument into a new closed survey: schema, pools and item banks (balance from zero), link tags, the report's blocks with the report private, and the uploaded files, with the schema pointed at the copies; responses and panel recruitment stay behind. **Delete survey** removes everything, including the uploaded files. Neither can be undone, and the dashboard list offers an inline delete only for surveys at zero responses.
+**Purge answers** (danger zone) empties a survey of its responses and of the randomization balance that goes with them, keeping the questionnaire, its files and its pool and item-bank configuration; the item banks' draws go too. The balance goes because leaving it would count arms as completed by respondents who no longer exist. This is the button for clearing your own test run before fielding. **Delete survey** removes everything, including the uploaded files. Neither can be undone, and the dashboard list offers an inline delete only for surveys at zero responses.
 
 The export is the handover point for analysis. What Survey adds on top of it, in §9, is for watching the data arrive and for showing it, not for writing it up.
 
@@ -250,7 +252,7 @@ Compliance with GDPR and the Swiss FADP, your institutional requirements and the
 
 - **Changing question wording after responses arrive changes what the data means.** The old rows keep their answers and the new column headers do not describe them; where you add or remove an item, past respondents are absent from it. Freeze the instrument before the first real response, and if you must edit afterwards, treat it as two studies and say so in the write-up.
 - **Name your questions for your analysis**, not for the editor. `pgt_q3` and `consent` survive the export; the SurveyJS builder's default `question1` does not tell you anything six months later. And never leave choice values as `Item 1`: reordering the options then silently changes what past answers mean.
-- **Pilot, then purge.** Walk the whole questionnaire yourself in each language, check the timing looks sane, then purge the answers and the balance before you field. A test run left in the data is indistinguishable from a participant.
+- **Pilot, then purge.** Walk the whole questionnaire yourself in each language, check the timing looks sane, then purge the answers and the balance (pools and item banks alike) before you field. A test run left in the data is indistinguishable from a participant.
 - **Circulate the review DOCX, not the JSON.** Reviewers comment on wording; the document exists so that the wording is what they see.
 - **Validate after every schema edit**, especially the forward-reference check: a condition reading an answer given on a later page can never be true, and the questionnaire will not tell you — the question just never appears.
 - **Design arms with two pools rather than one**, whenever the arms should not be equal in size. Balancing is uniform over combinations and knows no weights, so unequal allocation is expressed by structure, not by a setting.
@@ -260,4 +262,5 @@ Compliance with GDPR and the Swiss FADP, your institutional requirements and the
 - **Publish results after closing, unless the study is about sharing them as they come.** An open survey with a public page anchors everyone who looks before answering. Check the page with **Looking as** *anyone* first, and remember that small samples stay revealing even with every cell above five.
 - **Keep exports out of conversations.** The MCP surface never hands a model your responses; pasting the CSV into a chat undoes that in one move. Work on the export where your analysis already lives.
 - **Close the survey when you are done.** Closing blocks the page and the submit route, so nothing arrives after the cutoff you report.
+- **One survey per wave, made by duplicating.** A longitudinal study keeps its waves apart, each with its own link and its own export, and the copy carries the instrument unchanged; change only what the wave changes.
 - **Survey gives you an instrument and a clean table.** Sampling, recruitment, consent, ethics, weighting and analysis are the human work, and none of them is automated here.
