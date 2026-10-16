@@ -74,8 +74,11 @@ with TestClient(main.app) as client:
 
     print("\n--- the page ---")
     page = client.get("/admin/surveys/vb/randomization").text
-    ok('src="/static/bank-editor.js"' in page and 'class="bank-json"' in page,
+    ok('src="/static/bank-editor.js?v=' in page and 'class="bank-json"' in page,
        "the page loads the editor and keeps the JSON fields it writes into")
+    version = page.split('src="/static/bank-editor.js?v=')[1].split('"')[0]
+    ok(len(version) == 10 and version == main._asset_version("bank-editor.js"),
+       "the script address carries a hash of its content, so a deploy changes it past the CDN cache")
     ok(f'data-bank-id="{bid}"' in page and 'data-draws="0"' in page, "each bank form carries its id and draw count")
     model = json.loads(page.split("var model = ")[1].split(";\n")[0])
     owners = {p["name"]: p["owner"] for p in model["pages"]}

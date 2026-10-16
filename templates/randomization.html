@@ -646,7 +646,7 @@
     });
   </script>
   {% if banks %}
-  <script src="/static/bank-editor.js"></script>
+  <script src="/static/bank-editor.js?v={{ bank_editor_version or 0 }}"></script>
   <script>
     // the visual editor over each bank's JSON fields; without script the fields stay as they are
     (function() {

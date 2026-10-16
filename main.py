@@ -1,5 +1,6 @@
 import contextlib
 import csv
+import hashlib
 import io
 import itertools
 import json
@@ -11,6 +12,7 @@ import secrets
 import shutil
 import sqlite3
 import urllib.parse
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
@@ -1932,8 +1934,18 @@ def _randomization_context(db, survey, slug: str) -> dict:
         "banks": banks_data,
         "n_responses": n_responses,
         "default_item_regex": banks.DEFAULT_ITEM_REGEX,
+        "bank_editor_version": _asset_version("bank-editor.js"),
         "editor_model": _bank_editor_model(schema, pools_flow, bank_rows),
     }
+
+
+def _asset_version(name: str) -> str:
+    """A short hash of a static file, for its URL: Cloudflare keeps /static/* for hours,
+    so a deploy that changes the file must also change the address."""
+    try:
+        return hashlib.sha256((Path(__file__).parent / "static" / name).read_bytes()).hexdigest()[:10]
+    except OSError:
+        return "0"
 
 
 def _bank_editor_model(schema: dict, pools: list, bank_rows: list) -> dict:
