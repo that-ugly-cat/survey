@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Item bank editor — mockup</title>
+<!-- Static mockup for docs/item-banks-ui-spec.md. Data: the PROMETEO post bank. Only tabs,
+     quota sums and the assignment cards are interactive. -->
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0f1117; color: #e2e8f0; min-height: 100vh;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; }
+  header { padding: 1rem 1.5rem; border-bottom: 1px solid #2d3148; display: flex; gap: .75rem; align-items: baseline; }
+  header .crumb { color: #718096; font-size: .85rem; }
+  main { max-width: 1240px; margin: 0 auto; padding: 1.5rem; }
+  h2 { font-size: 1rem; margin: 0 0 1rem; }
+  .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px; }
+  .card-head { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.1rem; border-bottom: 1px solid #2d3148; }
+  .card-head input { background: #0f1117; border: 1px solid #2d3148; border-radius: 6px; color: #e2e8f0;
+                     font-weight: 600; padding: .35rem .6rem; font-size: .95rem; }
+  .spacer { flex: 1; }
+  .switch { display: inline-flex; align-items: center; gap: .45rem; color: #a0aec0; font-size: .8rem; }
+  .switch span { width: 30px; height: 16px; border-radius: 8px; background: #2d3148; position: relative; display: inline-block; }
+  .switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: #718096; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } .side { border-left: 0; border-top: 1px solid #2d3148; } }
+  .tabs { display: flex; gap: .25rem; padding: .6rem .8rem 0; border-bottom: 1px solid #2d3148; flex-wrap: wrap; }
+  .tab { background: none; border: 0; color: #a0aec0; padding: .55rem .8rem; border-bottom: 2px solid transparent;
+         cursor: pointer; font-size: .85rem; display: inline-flex; gap: .4rem; align-items: center; }
+  .tab[aria-selected=true] { color: #e2e8f0; border-bottom-color: #4a6fa5; }
+  .badge { font-size: .7rem; border-radius: 8px; padding: 0 .4rem; line-height: 1.1rem; }
+  .ok { background: #1e3a2a; color: #68d391; } .bad { background: #3b1d24; color: #fc8181; } .warn { background: #3a311a; color: #f6c453; }
+  .panel { padding: 1.1rem; display: none; } .panel.on { display: block; }
+  .label { font-size: .72rem; color: #718096; margin: 1rem 0 .4rem; text-transform: uppercase; letter-spacing: .04em; }
+  .hint { color: #718096; font-size: .8rem; }
+  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+  .btn { background: #0f1117; border: 1px solid #2d3148; color: #e2e8f0; border-radius: 6px; padding: .4rem .75rem; font-size: .8rem; cursor: pointer; }
+  .btn.primary { background: #4a6fa5; border-color: #4a6fa5; }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; }
+  input.num, input.txt, select { background: #0f1117; border: 1px solid #2d3148; color: #e2e8f0; border-radius: 6px; padding: .35rem .5rem; font-size: .85rem; }
+  input.num { width: 4.2rem; text-align: center; }
+  table { border-collapse: collapse; width: 100%; font-size: .82rem; }
+  th, td { border-bottom: 1px solid #2d3148; padding: .4rem .5rem; text-align: left; }
+  th { color: #718096; font-weight: 500; font-size: .75rem; }
+  .grid-wrap { max-height: 300px; overflow: auto; border: 1px solid #2d3148; border-radius: 8px; }
+  .chip { display: inline-block; font-family: ui-monospace, monospace; font-size: .76rem; padding: .12rem .45rem; border-radius: 5px;
+          background: #0f1117; border: 1px solid #2d3148; color: #cbd5e0; cursor: pointer; }
+  .v-F1 { border-color: #4a6fa5; } .v-F2 { border-color: #9f7aea; } .v-F3 { border-color: #38b2ac; } .v-A { border-color: #d69e2e; }
+  .empty { color: #4a5568; }
+  tr.short td { background: #241f14; }
+  .note { border: 1px solid #2d3148; border-left: 3px solid #4a6fa5; border-radius: 6px; padding: .6rem .8rem; color: #a0aec0; font-size: .82rem; margin-top: .8rem; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .6rem; }
+  .choice { border: 1px solid #2d3148; border-radius: 8px; padding: .75rem; cursor: pointer; background: #0f1117; }
+  .choice[aria-checked=true] { border-color: #4a6fa5; box-shadow: 0 0 0 1px #4a6fa5 inset; }
+  .choice b { display: block; margin-bottom: .25rem; }
+  .sub { display: none; margin-top: .9rem; } .sub.on { display: block; }
+  .sum-ok { color: #68d391; } .sum-bad { color: #fc8181; }
+  .side { border-left: 1px solid #2d3148; padding: 1rem; }
+  .draw { margin-bottom: .9rem; } .draw .chips { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .35rem; }
+  .finding { display: flex; gap: .6rem; padding: .5rem 0; border-bottom: 1px solid #2d3148; font-size: .82rem; }
+  .finding a { color: #90cdf4; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 60px; }
+  .bars div { width: 14px; background: #4a6fa5; border-radius: 2px 2px 0 0; }
+  dialog { background: #1a1d27; color: #e2e8f0; border: 1px solid #2d3148; border-radius: 10px; max-width: 760px; width: 92vw; }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  textarea { width: 100%; background: #0f1117; color: #cbd5e0; border: 1px solid #2d3148; border-radius: 6px; font-family: ui-monospace, monospace; font-size: .76rem; padding: .5rem; }
+  .preview-page { background: #fff; color: #1f2328; border-radius: 8px; padding: .8rem; font-size: .82rem; }
+</style>
+</head>
+<body>
+<header><strong>Randomization</strong><span class="crumb">PROMETEO — Ragionamento e informazione sulla salute · mockup of the item bank editor</span></header>
+<main>
+  <h2>Item banks</h2>
+  <section class="card" aria-label="Item bank Post">
+    <div class="card-head">
+      <input value="Post" aria-label="Bank name">
+      <span class="hint">20 items (14 slots + 6 anchors) over 48 pages · 20 per participant · 0 responses</span>
+      <span class="spacer"></span>
+      <label class="switch"><span></span>Edit as JSON</label>
+    </div>
+    <div class="layout">
+      <div>
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" aria-selected="true" data-t="content">① Content <span class="badge warn">1 warning</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-t="draw">② Draw <span class="badge ok">✓</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-t="groups">③ Groups <span class="badge ok" id="groups-badge">✓</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-t="check">④ Check &amp; save</button>
+        </div>
+
+        <!-- ① Content -->
+        <div class="panel on" id="p-content" role="tabpanel">
+          <div class="row">
+            <button class="btn" onclick="document.getElementById('gen').showModal()">Generate pages from a table…</button>
+            <button class="btn">Fill from page names</button>
+            <span class="spacer"></span>
+            <input class="txt" placeholder="Search items" aria-label="Search items">
+          </div>
+          <p class="hint">20 items · 4 versions (F1, F2, F3, A) · <span style="color:#f6c453">20 rows use only some versions: drawn less often</span> — expected here: anchors have only A, slots have no A.</p>
+          <div class="grid-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>F1</th><th>F2</th><th>F3</th><th>A</th><th></th></tr></thead>
+              <tbody id="grid"></tbody>
+            </table>
+          </div>
+          <div class="row" style="margin-top:.6rem"><button class="btn">+ Item</button><button class="btn">+ Version</button></div>
+          <div class="note">Click a cell to pick a page. Pages already in a pool or another bank are listed greyed, with where they belong.</div>
+        </div>
+
+        <!-- ② Draw -->
+        <div class="panel" id="p-draw" role="tabpanel">
+          <div class="label">Items per participant</div>
+          <div class="row"><input class="num" type="number" value="20" id="show"> <span class="hint">of 20 items in this bank (14 slots + 6 anchors)</span></div>
+          <div class="label">Order</div>
+          <div class="row"><label><input type="radio" name="ord" checked> random for each participant</label>
+            <label><input type="radio" name="ord"> as in the questionnaire</label></div>
+          <div class="note">Each participant answers 20 items. With <input class="num" value="300" aria-label="expected participants"> participants, each slot item is shown about 100 times per version and each anchor 300 times.</div>
+        </div>
+
+        <!-- ③ Groups -->
+        <div class="panel" id="p-groups" role="tabpanel">
+          <div class="row"><label><input type="radio" name="g"> No groups — versions balanced item by item</label>
+            <label><input type="radio" name="g" checked> Groups with quotas</label></div>
+          <div class="label">Quotas — each row must add up to the items per participant (20)</div>
+          <table id="quota">
+            <thead><tr><th>Group</th><th>F1</th><th>F2</th><th>F3</th><th>A</th><th>Total</th></tr></thead>
+            <tbody>
+              <tr><td><input class="txt" value="F1" size="5"></td><td><input class="num q" value="14"></td><td><input class="num q" value="0"></td><td><input class="num q" value="0"></td><td><input class="num q" value="6"></td><td class="tot"></td></tr>
+              <tr><td><input class="txt" value="F2" size="5"></td><td><input class="num q" value="0"></td><td><input class="num q" value="14"></td><td><input class="num q" value="0"></td><td><input class="num q" value="6"></td><td class="tot"></td></tr>
+              <tr><td><input class="txt" value="F3" size="5"></td><td><input class="num q" value="0"></td><td><input class="num q" value="0"></td><td><input class="num q" value="14"></td><td><input class="num q" value="6"></td><td class="tot"></td></tr>
+            </tbody>
+          </table>
+          <div class="row" style="margin-top:.5rem"><button class="btn">+ Group</button></div>
+          <div class="label">Group variable</div>
+          <div class="row"><input class="txt" value="forma_post"> <span class="hint">available in visibleIf as {forma_post}, saved with each response</span></div>
+
+          <div class="label">How a participant gets a group</div>
+          <div class="cards" role="radiogroup">
+            <div class="choice" role="radio" aria-checked="false" data-c="bal"><b>Balanced by the platform</b><span class="hint">The least-used group goes to the next participant. Recommended for single-wave studies.</span></div>
+            <div class="choice" role="radio" aria-checked="false" data-c="ans"><b>From an answer</b><span class="hint">A question or calculated value names the group. Sizes follow the answers.</span></div>
+            <div class="choice" role="radio" aria-checked="true" data-c="rot"><b>Rotation across waves</b><span class="hint">Each participant gets the next form at each wave, from their personal code.</span></div>
+          </div>
+
+          <div class="sub" id="sub-ans">
+            <div class="label">Answer that names the group</div>
+            <select><option>forma — calculated value (saved)</option><option>codice_giorno — question, page 2</option></select>
+            <p class="hint">Not available: <span class="chip">attenzione_vegetariano</span> asked after the bank · <span class="chip">tmp_score</span> calculated value not saved with the answers</p>
+          </div>
+
+          <div class="sub on" id="sub-rot">
+            <div class="row">
+              <label>Shared question <select><option>codice_giorno — «Il giorno del mese in cui sei nata o nato»</option></select></label>
+              <label>This questionnaire is wave <input class="num" type="number" value="1" min="1" id="wave"></label>
+              <label>Forms <input class="num" value="3" disabled></label>
+            </div>
+            <table style="margin-top:.7rem; max-width:520px">
+              <thead><tr><th>Starts in wave 1 with</th><th>Wave 2</th><th>Wave 3</th><th>Expected share</th></tr></thead>
+              <tbody>
+                <tr><td><span class="chip v-F1">F1</span></td><td><span class="chip v-F2">F2</span></td><td><span class="chip v-F3">F3</span></td><td>32.6% <span class="hint">(days 2, 5, … 29)</span></td></tr>
+                <tr><td><span class="chip v-F2">F2</span></td><td><span class="chip v-F3">F3</span></td><td><span class="chip v-F1">F1</span></td><td>32.6% <span class="hint">(days 3, 6, … 30)</span></td></tr>
+                <tr><td><span class="chip v-F3">F3</span></td><td><span class="chip v-F1">F1</span></td><td><span class="chip v-F2">F2</span></td><td>34.8% <span class="hint">(days 1, 4, … 31)</span></td></tr>
+              </tbody>
+            </table>
+            <div class="note">Will add to the questionnaire a calculated value <b>forma</b>, saved with the answers:<br>
+              <code id="expr">iif(({codice_giorno} + 1) % 3 = 0, 'F1', iif(({codice_giorno} + 1) % 3 = 1, 'F2', 'F3'))</code><br>
+              and use it as the source of the group. For the next wave, duplicate the survey and change only the wave number.</div>
+            <div class="row" style="margin-top:.6rem"><button class="btn primary">Add to questionnaire</button><span class="hint">Refused once the survey holds responses.</span></div>
+          </div>
+        </div>
+
+        <!-- ④ Check & save -->
+        <div class="panel" id="p-check" role="tabpanel">
+          <div class="finding"><span class="badge warn">warning</span><span>20 items lack a version the groups use and will be drawn less often. <a href="#">Content</a> — expected for anchors and slots.</span></div>
+          <div class="finding"><span class="badge warn">warning</span><span>The group comes from the answers, so groups are not balanced: their sizes follow the answers. <a href="#">Groups</a></span></div>
+          <div class="finding"><span class="badge ok">ok</span><span>Every page exists, belongs to this bank only, and its questions start with the page name.</span></div>
+          <div class="note">Saving resets the draws of this bank: <b>12 draws, 0 responses</b>. With responses on record you will be asked to type the bank name.</div>
+          <div class="row" style="margin-top:.8rem"><button class="btn primary">Save bank</button><button class="btn">Preview the walk for each group</button></div>
+
+          <div class="label" style="margin-top:1.4rem">After fielding — balance</div>
+          <div class="row" style="gap:2rem; align-items:flex-end">
+            <div><div class="hint">Completed per group</div><div class="bars"><div style="height:52px" title="F1 98"></div><div style="height:57px" title="F2 104"></div><div style="height:50px" title="F3 95"></div></div></div>
+            <div><div class="hint">Shows per item (min 92 · max 104)</div><div class="bars" id="expo"></div></div>
+            <div class="hint">Largest version gap: 0 (each item has one version per group)</div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="side" aria-label="Example draw">
+        <div class="label" style="margin-top:0">Example draw</div>
+        <p class="hint">From an empty history, not the next participant's. One per group.</p>
+        <div id="draws"></div>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<dialog id="gen">
+  <h2>Generate pages from a table</h2>
+  <div class="label">1 · Template page</div>
+  <select><option>post_template — «{{text}}»</option></select>
+  <span class="hint">Placeholders found: {{text}}</span>
+  <div class="label">2 · Table (paste from a spreadsheet, or upload CSV)</div>
+  <textarea rows="5">item	version	text
+P02	F1	Il riscaldamento globale degli ultimi decenni dipende soprattutto da un aumento dell'attività del Sole…
+P03	F2	Lavarsi le mani con acqua e sapone riduce la diffusione delle infezioni respiratorie e intestinali…
+P05	F3	Il vaccino antinfluenzale fa venire l'influenza…</textarea>
+  <div class="label">3 · Preview — 3 of 48 pages</div>
+  <div class="row" style="align-items:flex-start">
+    <div class="preview-page" style="flex:1"><b>Utente</b><br>Il riscaldamento globale degli ultimi decenni dipende soprattutto…<br><br><i>Quello che dice questo post è vero o falso?</i> 1 … 6</div>
+    <div class="hint" style="flex:1">Will add 48 pages after <span class="chip">post_template</span>:<br><span class="chip">P02_F1</span> with question <span class="chip">P02_F1_giudizio</span>, …<br>The template page stays as it is.</div>
+  </div>
+  <div class="row" style="margin-top:1rem"><button class="btn primary">Add 48 pages</button><button class="btn" onclick="this.closest('dialog').close()">Cancel</button></div>
+</dialog>
+
+<script>
+  // tabs
+  document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(x => x.setAttribute('aria-selected', x === t));
+    document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.id === 'p-' + t.dataset.t));
+  }));
+  // grid: 14 slots with F1–F3, 6 anchors with A (PROMETEO, wave 1)
+  const slots = [["P02","P13","P03"],["P06","P16","P04"],["P11","P19","P05"],["P12","P27","P09"],["P23","P30","P14"],["P24","P31","P18"],["P25","P35","P21"],["P40","P48","P22"],["P42","P51","P28"],["P46","P55","P29"],["P54","P57","P36"],["P56","P58","P38"],["P65","P60","P50"],["P66","P62","P53"]];
+  const anchors = ["P67","P08","P59","P45","P61","P37"];
+  const g = document.getElementById('grid');
+  slots.forEach((s, i) => g.insertAdjacentHTML('beforeend', `<tr class="short"><td>slot${String(i+1).padStart(2,'0')}</td>${s.map((p, k) => `<td><span class="chip v-F${k+1}">post_${p}</span></td>`).join('')}<td class="empty">—</td><td class="hint">⋮⋮</td></tr>`));
+  anchors.forEach(a => g.insertAdjacentHTML('beforeend', `<tr class="short"><td>ancora_${a}</td><td class="empty">—</td><td class="empty">—</td><td class="empty">—</td><td><span class="chip v-A">post_${a}</span></td><td class="hint">⋮⋮</td></tr>`));
+  // quota sums
+  function sums() {
+    const want = +document.getElementById('show').value; let bad = 0;
+    document.querySelectorAll('#quota tbody tr').forEach(r => {
+      const t = [...r.querySelectorAll('.q')].reduce((a, i) => a + (+i.value || 0), 0);
+      const c = r.querySelector('.tot'); const ok = t === want; if (!ok) bad++;
+      c.innerHTML = ok ? `<span class="sum-ok">${t} ✓</span>` : `<span class="sum-bad">${t} (${t > want ? '+' : ''}${t - want})</span>`;
+    });
+    const b = document.getElementById('groups-badge');
+    b.className = 'badge ' + (bad ? 'bad' : 'ok'); b.textContent = bad ? bad + ' error' + (bad > 1 ? 's' : '') : '✓';
+  }
+  document.querySelectorAll('.q, #show').forEach(i => i.addEventListener('input', sums)); sums();
+  // assignment choice
+  document.querySelectorAll('.choice').forEach(c => c.addEventListener('click', () => {
+    document.querySelectorAll('.choice').forEach(x => x.setAttribute('aria-checked', x === c));
+    document.getElementById('sub-ans').classList.toggle('on', c.dataset.c === 'ans');
+    document.getElementById('sub-rot').classList.toggle('on', c.dataset.c === 'rot');
+  }));
+  document.getElementById('wave').addEventListener('input', e => {
+    const w = +e.target.value || 1, r = `({codice_giorno} + ${w}) % 3`;
+    document.getElementById('expr').textContent = `iif(${r} = 0, 'F1', iif(${r} = 1, 'F2', 'F3'))`;
+  });
+  // example draws
+  const d = document.getElementById('draws');
+  ["F1","F2","F3"].forEach((f, k) => {
+    const pages = slots.map(s => s[k]).concat(anchors).sort(() => Math.random() - .5);
+    d.insertAdjacentHTML('beforeend', `<div class="draw"><b>${f}</b> <span class="hint">· 14 ${f} + 6 A</span><div class="chips">${pages.map(p => `<span class="chip ${anchors.includes(p) ? 'v-A' : 'v-' + f}">${p}</span>`).join('')}</div></div>`);
+  });
+  // exposure strip
+  const e = document.getElementById('expo');
+  for (let i = 0; i < 20; i++) e.insertAdjacentHTML('beforeend', `<div style="height:${46 + Math.round(Math.random() * 8)}px"></div>`);
+</script>
+</body>
+</html>
