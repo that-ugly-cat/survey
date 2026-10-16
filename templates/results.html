@@ -313,6 +313,9 @@
     // numbers under it, rendered by the server. Chart.js draws on top.
     const BLOCKS   = {{ blocks | tojson }};
     const POLL_URL = {{ poll_url | tojson }};
+    // A respondent's own token, carried on every request this page makes.
+    const MINE     = {{ (view_token or "") | tojson }};
+    const MINE_Q   = MINE ? "&r=" + encodeURIComponent(MINE) : "";
     const LOCALE   = {{ locale | tojson }};
     const BY       = {{ by | tojson }};
     const AS_WHO   = {{ as_who | tojson }};
@@ -504,7 +507,7 @@
       try {
         const r = await fetch(EXPLORE_URL + "?x=" + encodeURIComponent(x)
                               + "&y=" + encodeURIComponent(y)
-                              + "&lang=" + encodeURIComponent(LOCALE));
+                              + "&lang=" + encodeURIComponent(LOCALE) + MINE_Q);
         const data = await r.json();
         if (data.error) {
           box.innerHTML = '<p class="err">'
@@ -543,7 +546,7 @@
       try {
         const url = POLL_URL + "?lang=" + encodeURIComponent(LOCALE)
                   + (BY ? "&by=" + encodeURIComponent(BY) : "")
-                  + (AS_WHO ? "&as=" + encodeURIComponent(AS_WHO) : "");
+                  + (AS_WHO ? "&as=" + encodeURIComponent(AS_WHO) : "") + MINE_Q;
         const r = await fetch(url, { headers: { "Accept": "application/json" } });
         if (!r.ok) return;
         const data = await r.json();

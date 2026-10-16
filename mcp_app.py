@@ -299,7 +299,7 @@ def response_stats(slug: str) -> dict:
 
 # --- writing ---
 
-def _validated(schema, pools, force: bool, ignore=()):
+def _validated(schema, pools, force: bool, ignore=(), bank_cfgs=()):
     """(findings, refusal). A schema with structural errors is refused unless the
     caller has said force, because the alternative is fielding it.
 
@@ -308,8 +308,12 @@ def _validated(schema, pools, force: bool, ignore=()):
     variable it names comes into being when the pool does. Refusing there would
     make a counterbalanced questionnaire impossible to create in the order the
     platform requires.
+
+    `bank_cfgs` are the survey's item banks: without them a condition on a
+    bank's arm variable reads as dangling, and a schema that breaks a bank
+    passes unseen.
     """
-    findings = flow.validate(schema, pools)
+    findings = flow.validate(schema, pools, bank_cfgs)
     errors = [f for f in findings
               if f["severity"] == "error" and f["kind"] not in ignore]
     if errors and not force:
@@ -369,7 +373,8 @@ def update_schema(slug: str, schema: dict, force: bool = False) -> dict:
             return _fail(
                 f"'{slug}' already holds {held} response(s); editing the schema would "
                 f"change what they mean. Pass force=true if that is intended.")
-        findings, refusal = _validated(schema, _pools(db, row["id"]), force)
+        findings, refusal = _validated(schema, _pools(db, row["id"]), force,
+                                       bank_cfgs=_bank_cfgs(db, row["id"]))
         if refusal:
             return refusal
         db.execute("UPDATE surveys SET schema_json = ? WHERE id = ?",
@@ -427,6 +432,11 @@ def set_pool(slug: str, pool_pages: list, pool_name: str = "Pool", show_count: i
             return _fail(f"{n_combos} combinations: a pool enumerates them all at every page "
                          f"load, and above {banks.POOL_COMBINATION_CAP} that blocks the server. "
                          f"To sample items from a large set, use set_bank.")
+        held = main._bank_held_pages(db, row["id"])
+        clash = [p for p in pool_pages if p in held]
+        if clash:
+            return _fail("a page belongs to one bank or one pool, never both: "
+                         + ", ".join(f"{p} (bank {held[p]})" for p in clash[:5]))
         var = (condition_var or "").strip() or None
         cmap = json.dumps(condition_map) if (condition_map and show == 1 and var) else None
         porder = None
@@ -461,7 +471,8 @@ def set_pool(slug: str, pool_pages: list, pool_name: str = "Pool", show_count: i
         db.commit()
         return {"slug": slug, "pool_id": pool_id, "counters_reset": True,
                 "pools": _pools(db, row["id"]),
-                "findings": flow.validate(_schema(row), _pools(db, row["id"]))}
+                "findings": flow.validate(_schema(row), _pools(db, row["id"]),
+                                          _bank_cfgs(db, row["id"]))}
     finally:
         db.close()
 

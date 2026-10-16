@@ -653,6 +653,13 @@ def _view_ranking(agg, el, block, locale, mine):
                      [str(x) for x in i["positions"]] for i in items])], None)
 
 
+def _chosen(block, shape: str) -> str:
+    """The chart the block asks for, if this shape offers it; else the shape's default."""
+    offered = report_model.CHARTS[shape]
+    chart = (block or {}).get("chart")
+    return chart if chart in offered else offered[0]
+
+
 def _view_numeric(agg, el, block, locale, mine):
     bins = agg.get("bins") or []
     labels = [f"{b['from']:g}" if b["from"] == b["to"] else f"{b['from']:g}–{b['to']:g}"
@@ -664,7 +671,7 @@ def _view_numeric(agg, el, block, locale, mine):
         note = f"{t['median']} {s['median']}, {t['range']} {s['min']}–{s['max']}"
         if s.get("mean") is not None:
             note = f"{t['mean']} {s['mean']}, " + note
-    return ([{"chart": "histogram", "labels": labels,
+    return ([{"chart": _chosen(block, "numeric"), "labels": labels,
               "series": [{"label": None, "data": [b["n"] for b in bins]}],
               "stacked": False, "percent": False, "suppressed": [], "mine": None}],
             [_table([t["th_value"], t["th_n"]],
@@ -674,7 +681,7 @@ def _view_numeric(agg, el, block, locale, mine):
 
 def _view_temporal(agg, el, block, locale, mine):
     cells = agg.get("cells") or []
-    return ([{"chart": "line", "labels": [str(c["value"]) for c in cells],
+    return ([{"chart": _chosen(block, "temporal"), "labels": [str(c["value"]) for c in cells],
               "series": [{"label": None, "data": [c["n"] for c in cells]}],
               "stacked": False, "percent": False, "suppressed": [], "mine": None}],
             [_table([strings(locale)["th_date"], strings(locale)["th_n"]],

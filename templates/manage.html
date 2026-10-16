@@ -401,6 +401,28 @@
         </span>
       </div>
       <p class="hint mt">Review DOCX renders the questionnaire as a Word document for circulating to colleagues: primary language, answer formats, branching logic, randomization, and translation coverage.</p>
+
+      <h3 class="share-sub" id="duplicate">Duplicate</h3>
+      {% if dup_error %}<div class="notice notice-err">{{ dup_error }}</div>{% endif %}
+      <form method="post" action="/admin/surveys/{{ slug }}/duplicate">
+        <div class="grid2">
+          <div class="field">
+            <label for="new_title">Title of the copy</label>
+            <input id="new_title" name="new_title" value="{{ title }}" required autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="new_slug">Address of the copy</label>
+            <input id="new_slug" name="new_slug" value="{{ slug }}-2" required autocomplete="off"
+                   pattern="[a-z0-9][a-z0-9\-]{0,63}">
+          </div>
+        </div>
+        <button class="btn btn-blue" type="submit">Duplicate survey</button>
+      </form>
+      <p class="hint mt">For the next wave of a study, or a variant of it. The copy gets the schema,
+        the pools and item banks (balance from zero), the link tags, the report's blocks and the
+        uploaded files. It starts closed and with the report private to you; responses and panel
+        recruitment stay here. For a rotation across waves, change the wave number in the item
+        bank's rotation helper.</p>
     </section>
 
     <section>

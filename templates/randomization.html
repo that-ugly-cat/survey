@@ -429,7 +429,8 @@
     <div class="pool-card">
       <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/save" class="bank-form"
             data-bank-id="{{ bank.id }}" data-draws="{{ bank.n_draws }}"
-            onsubmit="return confirm('Save this bank and reset its draws?{% if n_responses %} The survey already holds {{ n_responses }} response(s): the balance starts again from zero.{% endif %}')">
+            data-responses="{{ n_responses or 0 }}" onsubmit="return confirmBankSave(this)">
+        <input type="hidden" name="confirm_name" value="">
         {% if bank_error and error_bank_id == bank.id %}
         <div class="pool-error">{{ bank_error }}</div>
         {% endif %}
@@ -695,6 +696,17 @@
       input.addEventListener('input', update);
       update();
     });
+
+    // Saving a bank resets its draws. Over collected responses the server wants
+    // the bank's name typed back; this asks for it.
+    function confirmBankSave(form) {
+      var held = parseInt(form.dataset.responses, 10) || 0;
+      if (!held) return confirm('Save this bank and reset its draws?');
+      var typed = prompt('The survey holds ' + held + ' response(s): saving restarts this bank\'s balance from zero. Type the bank name to confirm:');
+      if (typed === null) return false;
+      form.elements.confirm_name.value = typed.trim();
+      return true;
+    }
   </script>
   {% if banks %}
   <script src="/static/bank-editor.js?v={{ bank_editor_version or 0 }}"></script>

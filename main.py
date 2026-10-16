@@ -1190,6 +1190,7 @@ async def manage_survey(slug: str, request: Request):
         "url_tags": _url_tag_names(row),
         "url_tags_error": request.query_params.get("tags_error", ""),
         "url_tags_saved": request.query_params.get("tags_saved") == "1",
+        "dup_error": DUPLICATE_ERRORS.get(request.query_params.get("dup_error", ""), ""),
         "user": user,
         "slug": slug,
         "title": row["title"],
@@ -1431,6 +1432,11 @@ def _results_context(request, db, survey, slug, viewer, mine=None, by=None,
         "updated_at": time.strftime("%H:%M"),
         "poll_url": (f"/admin/surveys/{slug}/results.json" if viewer == aggregate.OWNER
                      else f"/s/{slug}/results.json"),
+        # The respondent's page is theirs only while it carries their token: a
+        # poll without it comes back as the public view, or as nothing at all
+        # on a report that stops at respondents.
+        "view_token": ((request.query_params.get("r") or "").strip()
+                       if viewer == aggregate.RESPONDENT else ""),
     }
 
 
@@ -1620,19 +1626,18 @@ def _report_context(db, survey, slug: str, saved: bool = False) -> dict:
     schema = json.loads(survey["schema_json"])
     stored = report_model.normalise(survey["report_json"], schema)
     questions = []
-    for page in schema.get("pages", []):
-        for el in page.get("elements", []):
-            if el.get("type") == "html":
-                continue
-            shape = aggregate.shape_of(el)
-            questions.append({
-                "name": el.get("name"),
-                "title": review_export.loc_text(el.get("title")) or el.get("name"),
-                "type": el.get("type"),
-                "page": page.get("name"),
-                "shape": shape,
-                "charts": report_model.CHARTS.get(shape, ["table"]),
-            })
+    # Panels walked through, as the aggregation and all_questions walk them: a
+    # question inside a panel is a question the report can show.
+    for page_name, el in report_model._elements(schema):
+        shape = aggregate.shape_of(el)
+        questions.append({
+            "name": el.get("name"),
+            "title": review_export.loc_text(el.get("title")) or el.get("name"),
+            "type": el.get("type"),
+            "page": page_name,
+            "shape": shape,
+            "charts": report_model.CHARTS.get(shape, ["table"]),
+        })
     return {
         "title": survey["title"],
         "slug": slug,
@@ -1841,6 +1846,10 @@ async def purge_responses(slug: str, request: Request):
     ).fetchall():
         db.execute("DELETE FROM assignments WHERE pool_id = ?", (pool["id"],))
         db.execute("DELETE FROM assignment_counts WHERE pool_id = ?", (pool["id"],))
+    # Item banks keep their own ledger, and pilot draws left in it would keep
+    # steering the bank after fielding starts.
+    db.execute("DELETE FROM bank_draws WHERE bank_id IN "
+               "(SELECT id FROM item_banks WHERE survey_id = ?)", (row["id"],))
     db.commit()
     _invalidate_results(row["id"])
     db.close()
@@ -1862,6 +1871,84 @@ async def delete_survey(slug: str, request: Request):
         shutil.rmtree(os.path.join(UPLOADS_PATH, slug), ignore_errors=True)
     db.close()
     return RedirectResponse("/admin", status_code=302)
+
+
+SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+DUPLICATE_ERRORS = {
+    "bad_slug": "The new address takes lowercase letters, digits and hyphens.",
+    "slug_taken": "That address is already used by another survey.",
+    "no_title": "The copy needs a title.",
+}
+
+
+def duplicate_survey_rows(db, row, new_slug: str, new_title: str, owner_id: int) -> int:
+    """Copy a survey's instrument into a new, closed survey and return its id.
+
+    What defines the questionnaire travels: the schema, the pools and item banks
+    (configuration only, so the copy starts balanced from zero), the link tags,
+    the report's blocks, and the uploaded files, with the schema's references to
+    them pointed at the copy. What belongs to one fielding stays: responses,
+    counters and draws, panel recruitment (each field has its own provider
+    links), and the report's reach, which starts at the owner so a copy never
+    publishes anything by being made. This is the next wave of a study, or a
+    variant of it; the rotation helper then changes only the wave number.
+    """
+    old_slug = row["slug"]
+    schema_json = row["schema_json"].replace(f"/uploads/{old_slug}/", f"/uploads/{new_slug}/")
+    schema = json.loads(schema_json)
+    report = report_model.normalise(row["report_json"], schema)
+    report["audience"] = aggregate.OWNER
+    report["explore"] = False
+    cur = db.execute(
+        "INSERT INTO surveys (slug, title, schema_json, owner_id, active, url_tags, report_json) "
+        "VALUES (?,?,?,?,0,?,?)",
+        (new_slug, new_title, schema_json, owner_id, row["url_tags"], json.dumps(report)))
+    new_id = cur.lastrowid
+    for p in db.execute(
+            "SELECT pool_name, pool_order, pool_pages, show_count, condition_var, condition_map, "
+            "page_order FROM rand_pools WHERE survey_id = ? ORDER BY pool_order, id",
+            (row["id"],)).fetchall():
+        db.execute(
+            "INSERT INTO rand_pools (survey_id, pool_name, pool_order, pool_pages, show_count, "
+            "condition_var, condition_map, page_order) VALUES (?,?,?,?,?,?,?,?)",
+            (new_id, *tuple(p)))
+    for b in db.execute(
+            "SELECT bank_name, bank_order, config_json FROM item_banks WHERE survey_id = ? "
+            "ORDER BY bank_order, id", (row["id"],)).fetchall():
+        db.execute("INSERT INTO item_banks (survey_id, bank_name, bank_order, config_json) "
+                   "VALUES (?,?,?,?)", (new_id, *tuple(b)))
+    src = os.path.join(UPLOADS_PATH, old_slug)
+    if os.path.isdir(src):
+        shutil.copytree(src, os.path.join(UPLOADS_PATH, new_slug), dirs_exist_ok=True)
+    return new_id
+
+
+@app.post("/admin/surveys/{slug}/duplicate")
+async def duplicate_survey(slug: str, request: Request):
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return RedirectResponse("/login", status_code=302)
+    row = _owned_survey(db, slug, user)
+    if not row:
+        db.close()
+        return RedirectResponse("/admin", status_code=302)
+    form = await request.form()
+    new_slug = (form.get("new_slug") or "").strip().lower().replace(" ", "-")
+    new_title = (form.get("new_title") or "").strip()
+    error = ("no_title" if not new_title else "bad_slug" if not SLUG_RE.match(new_slug)
+             else "slug_taken" if db.execute("SELECT 1 FROM surveys WHERE slug = ?",
+                                             (new_slug,)).fetchone() else None)
+    if error:
+        db.close()
+        return RedirectResponse(f"/admin/surveys/{slug}?dup_error={error}#duplicate",
+                                status_code=302)
+    duplicate_survey_rows(db, row, new_slug, new_title, user["id"])
+    db.commit()
+    db.close()
+    log.info("survey %s duplicated as %s", slug, new_slug)
+    return RedirectResponse(f"/admin/surveys/{new_slug}", status_code=302)
 
 
 # --- admin randomization ---
@@ -2104,6 +2191,14 @@ async def save_pool(slug: str, pool_id: int, request: Request):
             f"{banks.POOL_COMBINATION_CAP:,} that blocks the server. To sample items from a "
             f"large set, use an item bank. Nothing was saved.")
 
+    held = _bank_held_pages(db, survey["id"])
+    clash = [p for p in pool_pages if p in held]
+    if clash:
+        return refuse(
+            "A page belongs to one bank or one pool, never both: "
+            + ", ".join(f"{p} (bank {held[p]})" for p in clash[:5])
+            + ". Nothing was saved.")
+
     # condition_map and page_order only apply when show_count = 1 with a
     # condition variable; outside that they are dropped, as they always were.
     condition_map = None
@@ -2181,6 +2276,12 @@ def _bank_rows(db, survey_id: int) -> list:
     return [(r["id"], banks.normalise(r["config_json"])) for r in db.execute(
         "SELECT id, config_json FROM item_banks WHERE survey_id = ? ORDER BY bank_order, id",
         (survey_id,)).fetchall()]
+
+
+def _bank_held_pages(db, survey_id: int) -> dict:
+    """{page: bank name} for every page an item bank of this survey holds."""
+    return {name: cfg.get("name") or "?" for _, cfg in _bank_rows(db, survey_id)
+            for name in banks.bank_pages(cfg)}
 
 
 def _bank_belongs(db, slug: str, bank_id: int, user):
@@ -2292,7 +2393,17 @@ async def save_bank(slug: str, bank_id: int, request: Request):
     errors, _warnings = bank_save_errors(db, survey, bank_id, cfg)
     if errors:
         return refuse("This bank cannot be saved: " + "; ".join(errors) + ". Nothing was saved.")
+    # Over collected responses a save restarts the balance from zero, so it is
+    # confirmed by typing the bank's name, and checked here rather than trusted
+    # to whichever button sent the form.
+    held = _response_count(db, survey["id"])
+    if held and (form.get("confirm_name") or "").strip() != cfg["name"]:
+        return refuse(f"The survey holds {held} response(s), and saving restarts this bank's "
+                      f"balance from zero: type the bank name to confirm. Nothing was saved.")
     store_bank(db, survey["id"], bank_id, cfg)
+    if held:
+        log.warning("bank %s of survey %s saved over %d response(s); draws reset",
+                    bank_id, slug, held)
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
 

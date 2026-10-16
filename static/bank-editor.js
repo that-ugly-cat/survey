@@ -773,7 +773,7 @@
         action = existing ? "Replace in questionnaire" : "Add to questionnaire";
       }
       box.appendChild(el("div", { class: "be-note" }, [status + " ", el("code", { text: expr })]));
-      box.appendChild(el("p", { class: "hint", text: "For the next wave, create a new survey from the same schema, paste this bank's JSON into a new bank, and set the wave number here." }));
+      box.appendChild(el("p", { class: "hint", text: "For the next wave, duplicate the survey from its manage page and set the wave number here, in the copy." }));
       if (action) {
         var note = el("span", { class: "hint" });
         box.appendChild(el("div", { class: "count-row" }, [el("button", { type: "button", class: "btn-sm btn-secondary", text: action,
@@ -830,7 +830,10 @@
     var o = this.opts;
     if (o.nResponses) {
       var typed = prompt("The survey holds " + o.nResponses + " response(s): saving restarts this bank's balance from zero. Type the bank name to confirm:");
-      return typed !== null && typed.trim() === this.st.name;
+      if (typed === null || typed.trim() !== this.st.name) return false;
+      // the server checks it again: a save over responses carries the name typed back
+      if (this.form.elements.confirm_name) this.form.elements.confirm_name.value = typed.trim();
+      return true;
     }
     return confirm("Save this bank and reset its draws?");
   };

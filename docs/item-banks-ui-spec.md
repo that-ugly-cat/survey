@@ -158,9 +158,8 @@ it matches, red with the difference otherwise. *Add group*; the arm name is edit
    - the calculated value it will add, in words and as an expression.
 
    *Add to questionnaire* (*Replace in questionnaire* when the name exists) writes the calculated value
-   (`includeIntoResult: true`) and sets `arm_from` to it. For the next wave, the author creates a new
-   survey from the same schema, pastes the bank's JSON into a new bank, and changes the wave number here
-   (there is no copy-survey action yet).
+   (`includeIntoResult: true`) and sets `arm_from` to it. For the next wave, the author duplicates the
+   survey from its manage page and changes the wave number here, in the copy.
 
 ### ④ Check & save
 

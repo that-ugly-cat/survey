@@ -63,7 +63,8 @@ or JSON.
 - **Language selector** (EN/DE/FR/IT) with browser autodetect and visibility driven by which
   translations exist in the schema.
 - **Per-survey manage page** — stats (responses, last response), shareable public URL with a
-  ready-made **QR code**, exports, questionnaire tools, panel settings, and a danger zone that
+  ready-made **QR code**, exports, questionnaire tools including **Duplicate survey** (the
+  instrument copied into a new closed survey, for the next wave), panel settings, and a danger zone that
   spells out what each destructive action destroys — **Purge answers**, which empties a survey
   of its responses and balance while keeping the instrument, so a test run can be cleared before
   fielding, and **Delete survey**. The survey list keeps only the everyday actions. Help
@@ -152,7 +153,7 @@ From there:
 
 ## Checks
 
-Twenty-one self-contained Python scripts and one node script, no test framework and no
+Twenty-two self-contained Python scripts and one node script, no test framework and no
 running server. They build their own
 temporary database, so they never touch real data:
 
@@ -164,7 +165,7 @@ python test_aggregate.py && python test_report.py && python test_results.py
 python test_stats.py && python test_explore.py && python test_banks.py
 python test_arm_from.py && python test_bank_check.py && python test_rotation.py
 python test_pagegen.py && python test_balance.py && python test_notice.py
-python test_url_tags.py && node test_bank_editor.js
+python test_url_tags.py && python test_review_fixes.py && node test_bank_editor.js
 ```
 
 `test_banks.py` covers item banks: allocation balance simulated over 300 participants, quotas, tie-breaking, six simultaneous arrivals, the pending window, validation, the round trip through the page load and the submit (including a forged `_banks` being discarded), the long export, the admin and MCP surfaces, and the guard on pools whose combinations would block the server. `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -196,13 +197,16 @@ check that saves nothing, the rotation expression, the page generator with its d
 guard over collected answers, and the balance panel — and `test_bank_editor.js` the editor's
 pure functions, against the same expected strings. `test_notice.py` holds the participant
 notice to its factual claims (no cookies, no browser storage, nothing from a third party), and
-`test_url_tags.py` covers link tags and the response id in the exports.
+`test_url_tags.py` covers link tags and the response id in the exports, and
+`test_review_fixes.py` the defects a documentation review found in October 2026 (purge and bank
+draws, a respondent's token on the poll, the MCP validating with banks, the typed bank name, panels
+in the report editor) plus the duplicate action.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags review_fixes; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one

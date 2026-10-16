@@ -109,7 +109,7 @@ allowed to decide what a question type means.
 | `text` (date) | date | counts per day | timeline |
 | `text` (short) | string | count, median length | none — listed, owner only |
 | `comment` | string | count, median length | none — listed, owner only |
-| `panel` | — | walked through: its children are the questions (the editor's question list does not yet look inside panels; `all_questions` does) | — |
+| `panel` | — | walked through: its children are the questions | — |
 | `html` | — | nothing | — |
 
 Rules that apply across the table:
@@ -148,8 +148,7 @@ already happens.
 
 The charts on offer are bar, column, pie, segmented, stacked, grouped, histogram, line, list
 and table; which of them a question can take depends on its shape, default first
-(`report.CHARTS`). Numeric questions are always drawn as a histogram and dates as a line,
-whatever the block asks. Everything also has a **table view** underneath it, rendered by the
+(`report.CHARTS`). A chart the shape does not offer falls back to its default when drawn. Everything also has a **table view** underneath it, rendered by the
 server into the HTML. That table is what makes the page readable with JavaScript off, and it
 is the thing a co-author actually copies.
 
