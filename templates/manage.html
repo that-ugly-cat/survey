@@ -248,7 +248,10 @@
   <div class="modal-overlay" id="config-help">
     <div class="modal">
       <button class="modal-close" onclick="closeHelp('config-help')">✕</button>
-      <h3>Randomization and files</h3>
+      <h3>Configuration</h3>
+      <p>Four things sit outside the questionnaire schema and are set here: who sees which pages
+        (pools and item banks), the files the schema points to, and what the results page shows.
+        The randomization and report pages each have their own <strong>?</strong> with the detail.</p>
 
       <h4>Randomization — pools</h4>
       <p>A pool is a set of pages from which each participant is shown a given number. With four
@@ -277,6 +280,17 @@
       <p>Saving a pool clears its balance history, since the old counts no
         longer describe the new set of combinations.</p>
 
+      <h4>Randomization — item banks</h4>
+      <p>A bank is for many stimuli of which each participant sees a few: per participant it
+        draws a number of items, one version of each, in random or schema order, and hides the
+        rest. Each version is a page of the schema, so every answer lands in a column that says
+        which item it was about. Optional arms set how many items of each version a participant
+        gets, and the drawn arm is exposed as a variable like a pool's condition.</p>
+      <p>Balance works as for pools: the least-shown items are drawn, counting completed
+        responses plus draws issued in the last hour. Each response records what it was shown,
+        from the server's own ledger, and <strong>Long CSV</strong> gives one row per
+        response and drawn item. A page belongs to one pool or one bank, never both.</p>
+
       <h4>Files</h4>
       <p>Each survey has its own upload folder, so two surveys can hold files of the same name
         without colliding. Images, PDFs and SVGs are accepted (jpg, jpeg, png, gif, webp, svg,
@@ -293,6 +307,58 @@
       <p>The reference data shipped with the platform (cantons and countries, in EN, DE, FR and
         IT) is served to every survey from <code>/uploads/shared/</code>, so you do not upload it:
         that is how a country drop-down gets its options without hard-coding them into every schema.</p>
+
+      <h4>Results report</h4>
+      <p><strong>Results report</strong> decides what the results page contains, block by block,
+        and how far each block may travel: private to you, shown to respondents after they submit,
+        or visible to anyone with the link. A new report holds nothing until you add blocks;
+        <em>all questions</em> is one block that follows the schema as it changes.</p>
+      <p><strong>View results</strong> opens the page as you see it; <em>looking as</em> a respondent or
+        anyone shows it as they would see it, through the same filter. Anyone but you
+        sees <code>&lt;5</code> in place of a count below five. Questions on randomized pages are
+        counted against the people who were shown them, so an item drawn for ten people out of
+        sixty reads as ten asked, not fifty skipped.</p>
+    </div>
+  </div>
+
+  <!-- Link tags help -->
+  <div class="modal-overlay" id="tags-help">
+    <div class="modal">
+      <button class="modal-close" onclick="closeHelp('tags-help')">✕</button>
+      <h3>Link tags</h3>
+
+      <h4>What they are for</h4>
+      <p>A link tag tells apart the routes by which people reached an open link: the newsletter,
+        a conference, a post on one social network rather than another. You hand out one link per
+        route, each with its own value, and every response records which one was used.</p>
+      <pre>{{ public_url }}?channel=newsletter
+{{ public_url }}?channel=conference</pre>
+
+      <h4>Setting them up</h4>
+      <p>List the parameter names, up to five, separated by commas. A name is 1 to 32 letters,
+        digits, hyphens or underscores, matched case-insensitively. It cannot be
+        <code>preview</code>, which is reserved, nor the panel token parameter. Parameters not on
+        the list are ignored, so a link copied with tracking parameters attached stores nothing
+        extra.</p>
+      <p>A value may hold letters, digits, dots, hyphens and underscores, up to 64 characters.
+        Anything else is dropped rather than cleaned, so what is stored is what the link said.</p>
+
+      <h4>In your data</h4>
+      <p>The value is stored with the response as <code>_url.channel</code>, which the CSV and
+        Excel exports show as the column <code>_url_channel</code>. A response from a link without
+        the tag has the column empty.</p>
+
+      <h4>In the questionnaire</h4>
+      <p>The value is also readable in expressions as <code>{url_channel}</code>, for instance to
+        show a page only to people who came from one route:</p>
+      <pre>"visibleIf": "{url_channel} = 'conference'"</pre>
+
+      <div class="note">
+        <p>A tag records which link somebody used, not who they are: anyone can edit the end of a
+          link. Use it to describe where responses came from, never to admit or exclude people,
+          and never put anything personal in a value. Screening people in or out is what panel
+          mode is for.</p>
+      </div>
     </div>
   </div>
 
@@ -429,7 +495,7 @@
       <div class="section-head">
         <h2>Configuration</h2>
         <button class="help-btn" onclick="openHelp('config-help')"
-                title="Randomization and files">?</button>
+                title="Randomization, files and the results report">?</button>
       </div>
       <div class="config-item">
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/randomization">Randomization</a>
@@ -509,6 +575,8 @@
     <section>
       <div class="section-head">
         <h2>Link tags</h2>
+        <button class="help-btn" onclick="openHelp('tags-help')"
+                title="Telling recruitment channels apart">?</button>
       </div>
 
       {% if url_tags_saved %}<div class="notice notice-ok">Link tags saved.</div>{% endif %}

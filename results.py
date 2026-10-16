@@ -10,6 +10,7 @@ Pure module: no FastAPI, no database.
 """
 
 import html
+import re
 
 import markdown as md_lib
 
@@ -712,6 +713,35 @@ _VIEWS = {
 
 # --- assembly ---
 
+_IMG_SRC = re.compile(r"""<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)["']""", re.I)
+
+
+def _page_context(schema: dict, locale: str) -> dict:
+    """For each question, what its page puts around it: the page's title, the
+    page's internal name, and the first image an html element on the page shows.
+
+    A questionnaire that asks the same question about many stimuli (rate this
+    image, then the next) has one title for every block, so without the page the
+    results are a column of identical headings. The image is what the respondent
+    was looking at when they answered. Only images served from this platform or
+    over https are carried: a data URI is the schema's business, not the page's.
+    """
+    out = {}
+    for page in schema.get("pages", []):
+        image = None
+        for el in page.get("elements") or []:
+            if el.get("type") != "html":
+                continue
+            m = _IMG_SRC.search(loc(el.get("html"), locale) or "")
+            if m and m.group(1).startswith(("/uploads/", "https://")):
+                image = m.group(1)
+                break
+        title = loc(page.get("title"), locale)
+        for page_name, el, _ in aggregate.elements_of({"pages": [page]}):
+            out[el.get("name")] = {"page": page_name, "page_title": title, "image": image}
+    return out
+
+
 def build(schema: dict, pools, report: dict, responses: list, viewer: str,
           locale: str = "en", mine: dict = None, by: str = None) -> dict:
     """The blocks a viewer sees, each one ready to draw.
@@ -726,6 +756,14 @@ def build(schema: dict, pools, report: dict, responses: list, viewer: str,
     summary = aggregate.summarise(schema, pools, responses, only=names, by=by)
     aggs = {q["name"]: q for q in summary["questions"]}
     elements = {el.get("name"): el for _, el, _ in aggregate.elements_of(schema)}
+    context = _page_context(schema, locale)
+    # A heading that repeats needs its page beside it. Readers get the page's
+    # title when it has one; only the owner gets the internal name, which is the
+    # schema's vocabulary and not something a public page should print.
+    title_count = {}
+    for name in names:
+        t = loc(elements.get(name, {}).get("title"), locale) or name
+        title_count[t] = title_count.get(t, 0) + 1
 
     out = []
     for block in blocks:
@@ -750,9 +788,16 @@ def build(schema: dict, pools, report: dict, responses: list, viewer: str,
         # because the block is also published would hide the data from the one
         # person entitled to it.
         shown = aggregate.for_audience(agg, viewer)
+        title = loc(el.get("title"), locale) or name
+        where = context.get(name, {})
+        label = where.get("page_title")
+        if not label and title_count.get(title, 0) > 1 and viewer == aggregate.OWNER:
+            label = where.get("page")
         entry = {
             "kind": "question", "name": name,
-            "title": loc(el.get("title"), locale) or name,
+            "title": title,
+            "context": label or None,
+            "image": where.get("image"),
             "description": loc(el.get("description"), locale),
             "n": shown.get("n", 0), "missing": shown.get("missing", 0),
             "exposed": shown.get("exposed", 0),

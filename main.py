@@ -1385,6 +1385,21 @@ def _pool_rows(db, survey_id: int) -> list:
     return out
 
 
+def _randomized_pages(db, survey_id: int) -> list:
+    """What aggregation needs to know about randomization: the pools, and each
+    item bank as one more group of pages a respondent may not have been shown.
+
+    Without the banks, a bank page counted as reached by every respondent, so
+    on a bank showing 10 of 67 items each item looked skipped by most people.
+    """
+    out = _pool_rows(db, survey_id)
+    for b in db.execute("SELECT bank_name, config_json FROM item_banks WHERE survey_id = ? "
+                        "ORDER BY bank_order, id", (survey_id,)).fetchall():
+        out.append({"bank_name": b["bank_name"],
+                    "pool_pages": banks.bank_pages(banks.normalise(b["config_json"]))})
+    return out
+
+
 def _pick_locale(request: Request, available: list, default: str = None) -> str:
     asked = request.query_params.get("lang") or request.cookies.get("lang")
     if asked in available:
@@ -1398,7 +1413,7 @@ def _pick_locale(request: Request, available: list, default: str = None) -> str:
 def _build_results(db, survey, viewer: str, locale: str, mine=None, by=None) -> dict:
     schema = json.loads(survey["schema_json"])
     stored = report_model.normalise(survey["report_json"], schema)
-    pools = _pool_rows(db, survey["id"])
+    pools = _randomized_pages(db, survey["id"])
     responses = [json.loads(r["response_json"]) for r in db.execute(
         "SELECT response_json FROM responses WHERE survey_id = ?", (survey["id"],))]
     return results_view.build(schema, pools, stored, responses, viewer, locale, mine, by)

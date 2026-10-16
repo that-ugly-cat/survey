@@ -302,6 +302,71 @@ with TestClient(main.app) as client:
     ok(n_after == n_before + 1,
        "a new response shows up at once instead of waiting for the cache to age out")
 
+    print("\n--- the page's own script parses ---")
+    # On 16 Oct 2026 a second `const MINE` (the respondent's token, next to the
+    # colour of the same name) made the whole inline script a SyntaxError: the
+    # numbers were there, rendered by the server, and not one chart was drawn.
+    import re, shutil, subprocess
+    page = client.get("/admin/surveys/open/results", cookies=owner_cookie).text
+    inline = [s for s in re.findall(r"<script>(.*?)</script>", page, re.S) if s.strip()]
+    ok(bool(inline), "the page carries its inline script")
+    node = shutil.which("node")
+    if node:
+        path = os.path.join(tmp, "results_inline.js")
+        open(path, "w", encoding="utf-8").write("\n;\n".join(inline))
+        check = subprocess.run([node, "--check", path], capture_output=True, text=True)
+        show("node --check", check.stderr.strip().splitlines()[-1:] or "clean")
+        ok(check.returncode == 0, "and node parses it, which a name declared twice fails")
+    else:
+        print("    [node --check] skipped: node is not on the PATH")
+
+    print("\n--- an item bank: who was asked, and which stimulus a block is about ---")
+    bank_pages = [f"s_{i}" for i in range(6)]
+    bank_schema = {"pages": [{"name": "intro", "elements": [
+        {"type": "radiogroup", "name": "age", "title": "Age", "choices": ["a", "b"]}]}] + [
+        {"name": p, "elements": [
+            {"type": "html", "name": f"{p}_img", "html": f'<img src="/uploads/bank/{p}.jpg" alt="">'},
+            {"type": "radiogroup", "name": f"{p}_vote", "title": "How much do you like it?",
+             "choices": [1, 2, 3]}]} for p in bank_pages]}
+    db = main.get_db()
+    db.execute("INSERT INTO surveys (slug, title, schema_json, owner_id, active, report_json) "
+               "VALUES (?,?,?,?,1,?)", ("bank", "bank", json.dumps(bank_schema), owner_id,
+                                        json.dumps({"audience": "public",
+                                                    "blocks": [{"kind": "all_questions"}]})))
+    sid = db.execute("SELECT id FROM surveys WHERE slug='bank'").fetchone()["id"]
+    db.execute("INSERT INTO item_banks (survey_id, bank_name, config_json) VALUES (?,?,?)",
+               (sid, "stimuli", json.dumps({"name": "stimuli", "show_count": 2, "items": [
+                   {"item": p, "versions": {"v": p}} for p in bank_pages]})))
+    # Ten people, each shown two pages; s_0 is shown to the first six, as the
+    # browser stores it: a comma-separated string, with the server's ledger beside it.
+    for n in range(10):
+        drawn = ["s_0", "s_1"] if n < 6 else ["s_2", "s_3"]
+        data = {"age": "a", "_assignment": ",".join(drawn), "_assignment_ids": [f"b{n}"],
+                "_banks": {"stimuli": {"arm": None, "draw_id": n, "items": drawn,
+                                       "versions": ["v", "v"], "pages": drawn}}}
+        data.update({f"{p}_vote": 2 for p in drawn})
+        db.execute("INSERT INTO responses (survey_id, response_json) VALUES (?,?)",
+                   (sid, json.dumps(data)))
+    db.commit(); db.close()
+    owner_view = {b["name"]: b for b in client.get("/admin/surveys/bank/results.json",
+                                                    cookies=owner_cookie).json()["blocks"]}
+    b0 = owner_view["s_0_vote"]
+    show("s_0_vote", {k: b0[k] for k in ("n", "exposed", "missing", "context", "image")})
+    ok(b0["exposed"] == 6 and b0["missing"] == 0,
+       "a bank page counts the people it was drawn for, not everyone")
+    ok(owner_view["s_4_vote"]["exposed"] == 0, "and a page drawn for nobody counts nobody")
+    ok(owner_view["age"]["exposed"] == 10, "a page outside the bank still counts everyone")
+    ok(b0["context"] == "s_0" and b0["image"] == "/uploads/bank/s_0.jpg",
+       "a repeated heading gets its page, and the block the image the respondent saw")
+    ok(owner_view["age"]["context"] is None, "a heading that does not repeat gets nothing")
+    public_view = {b["name"]: b for b in client.get("/s/bank/results.json").json()["blocks"]}
+    ok(public_view["s_0_vote"]["context"] is None
+       and public_view["s_0_vote"]["image"] == "/uploads/bank/s_0.jpg",
+       "a reader gets the image but never the schema's internal page name")
+    html = client.get("/admin/surveys/bank/results", cookies=owner_cookie).text
+    ok('class="qimg" src="/uploads/bank/s_0.jpg"' in html and '<p class="qctx">s_0</p>' in html,
+       "and the page renders both")
+
     print("\n--- chart.js is ours, not a CDN's ---")
     r = client.get("/static/chart.umd.min.js")
     ok(r.status_code == 200 and "Chart.js v4" in r.text[:400],

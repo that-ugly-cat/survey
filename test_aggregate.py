@@ -314,5 +314,25 @@ for name, agg in BY_NAME.items():
 show("shapes filtered", sorted({a["shape"] for a in BY_NAME.values()}))
 ok(not broken, "every shape survives every audience filter" + (f" — {broken}" if broken else ""))
 
+print("\n--- the assignment as it is stored ---")
+# The browser sends `_assignment` as a comma-separated string. Read as a list it
+# became a set of characters, and every pool page counted as shown to nobody.
+pool_schema = {"pages": [{"name": n, "elements": [{"type": "text", "name": f"{n}_q"}]}
+                         for n in ("arm_a", "arm_b", "after")]}
+pools = [{"pool_pages": ["arm_a", "arm_b"]}]
+stored = [{"_assignment": "arm_a", "arm_a_q": "x", "after_q": "y"},
+          {"_assignment": "arm_b", "arm_b_q": "x", "after_q": "y"},
+          {"_assignment": "arm_a,", "arm_a_q": "x", "after_q": "y"}]
+out = {q["name"]: q for q in aggregate.summarise(pool_schema, pools, stored)["questions"]}
+print(f"    [exposed] arm_a_q {out['arm_a_q']['exposed']}, arm_b_q {out['arm_b_q']['exposed']}, "
+      f"after_q {out['after_q']['exposed']}")
+ok(out["arm_a_q"]["exposed"] == 2 and out["arm_b_q"]["exposed"] == 1,
+   "a pool page counts the people it was assigned to, from the stored string")
+ok(out["after_q"]["exposed"] == 3, "and a page outside the pool counts everyone")
+ok(aggregate.assigned_pages({"_assignment": ["arm_a"]}) == {"arm_a"},
+   "a list is still read as a list")
+ok(aggregate.assigned_pages({"_banks": {"b": {"pages": ["s_1"]}}, "_assignment": ""}) == {"s_1"},
+   "and a bank's draw comes from the server's record, even when the browser listed nothing")
+
 print("\n" + ("ALL PASS" if not FAILED else f"{len(FAILED)} FAILED: " + "; ".join(FAILED)))
 sys.exit(1 if FAILED else 0)

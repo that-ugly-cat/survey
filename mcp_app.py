@@ -667,7 +667,7 @@ def question_summary(slug: str, name: str = None, audience: str = "public") -> d
         schema = _schema(row)
         if name and name not in report_model.question_names(schema):
             return _fail(f"no question '{name}' in '{slug}'")
-        pools = main._pool_rows(db, row["id"])
+        pools = main._randomized_pages(db, row["id"])
         responses = [json.loads(r["response_json"]) for r in db.execute(
             "SELECT response_json FROM responses WHERE survey_id = ?", (row["id"],))]
         out = aggregate.summarise(schema, pools, responses,

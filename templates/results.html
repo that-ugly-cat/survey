@@ -50,6 +50,9 @@
     }
     .card h2 { font-size: 1rem; line-height: 1.45; margin-bottom: 0.25rem; }
     .qdesc { font-size: 0.82rem; color: #718096; margin-bottom: 0.7rem; }
+    .qctx { font-size: 0.75rem; color: #718096; letter-spacing: 0.04em; margin-bottom: 0.15rem; }
+    .qimg { display: block; max-width: 240px; max-height: 240px; width: auto; height: auto;
+            border-radius: 6px; margin: 0.4rem 0 0.7rem; }
     .base {
       font-size: 0.74rem; color: #718096; margin-bottom: 0.9rem;
       text-transform: uppercase; letter-spacing: 0.05em;
@@ -232,7 +235,9 @@
         <div class="card"><p class="note thin">{{ b.note }}</p></div>
       {% else %}
         <section class="card" data-name="{{ b.name }}">
+          {% if b.context %}<p class="qctx">{{ b.context }}</p>{% endif %}
           <h2>{{ b.title }}</h2>
+          {% if b.image %}<img class="qimg" src="{{ b.image }}" alt="" loading="lazy">{% endif %}
           {% if b.description %}<p class="qdesc">{{ b.description }}</p>{% endif %}
           <p class="base">
             {{ b.n }} {{ t.answered }}{% if b.missing %} · {{ b.missing }} {{ t.skipped }}{% endif %}{% if b.exposed != b.n %} · {{ b.exposed }} {{ t.asked }}{% endif %}
@@ -322,7 +327,7 @@
     const HIDDEN   = {{ t.hidden | tojson }};
 
     const INK   = "#4a6fa5";
-    const MINE  = "#2f8f5b";
+    const MINE_INK = "#2f8f5b";
     const SCALE = ["#4a6fa5", "#6b8cbd", "#9db4d4", "#c9b8a8", "#c98a5e", "#b5643a"];
     const GRID  = "#edf2f7";
 
@@ -345,7 +350,7 @@
       const datasets = p.series.map(function (s, i) {
         const colors = multi ? palette(p.series.length)[i]
                              : p.labels.map(function (_, j) {
-                                 return (p.mine && p.mine.indexOf(j) !== -1) ? MINE : INK;
+                                 return (p.mine && p.mine.indexOf(j) !== -1) ? MINE_INK : INK;
                                });
         return {
           label: s.label || "",

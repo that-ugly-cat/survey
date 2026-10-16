@@ -89,16 +89,38 @@ def values_of(schema: dict, data: dict) -> dict:
     return values
 
 
+def assigned_pages(data: dict) -> set:
+    """The randomized pages this respondent was given.
+
+    `_assignment` is stored as the browser sends it, a comma-separated string;
+    a list is accepted too. An item bank's draw comes from `_banks`, which the
+    server writes from its own ledger at submit and which also holds the draws
+    whose pages the browser never listed (an arm taken from an answer).
+
+    Reading the string as a list once turned it into a set of characters, so
+    every pool page counted as never shown to anyone (found 16 Oct 2026).
+    """
+    raw = data.get("_assignment") or []
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    pages = {p.strip() for p in raw if isinstance(p, str) and p.strip()}
+    for record in (data.get("_banks") or {}).values():
+        if isinstance(record, dict):
+            pages.update(p for p in record.get("pages") or [] if isinstance(p, str))
+    return pages
+
+
 def pages_shown(schema: dict, pools, data: dict) -> set:
     """Page names this respondent actually walked through.
 
-    Two things hide a page: randomization (a pool page that was not assigned)
-    and a page-level condition. Without this, a question on an unassigned arm
-    counts as skipped by everyone in the other arm, and every conditional page
-    looks like mass abandonment.
+    Two things hide a page: randomization (a pool or bank page that was not
+    assigned) and a page-level condition. Without this, a question on an
+    unassigned arm counts as skipped by everyone in the other arm, and every
+    conditional page looks like mass abandonment. `pools` carries the item
+    banks too, each as the list of its pages (see main._randomized_pages).
     """
     values = values_of(schema, data)
-    assigned = set(data.get("_assignment") or [])
+    assigned = assigned_pages(data)
     pooled = {name for p in pools for name in (p.get("pool_pages") or [])}
 
     shown = set()
