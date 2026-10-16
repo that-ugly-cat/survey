@@ -1,10 +1,17 @@
 # Item banks — a visual editor
 
-*16 October 2026. Status: **phases 1, 2 and 3 implemented** (`static/bank-editor.js`, the check route in `main.py`,
+*16 October 2026. Status: **all four phases implemented** (`static/bank-editor.js`, the check route in `main.py`,
 `test_bank_editor.js` under Node and `test_bank_check.py`; phase 2 in `rotation.py`, the rotation route
-and `test_rotation.py`; phase 3 in `pagegen.py`, the generate-pages route and `test_pagegen.py`); phase 4
-designed. Mockup:
+and `test_rotation.py`; phase 3 in `pagegen.py`, the generate-pages route and `test_pagegen.py`; phase 4 in
+`banks.balance_view`, the panel in `randomization.html` and `test_balance.py`). Mockup:
 `docs/mockups/item-banks-ui.html` (static, with just enough script to switch tabs and check sums).*
+
+**Phase 4 adds one thing to the design.** When a bank's groups come from the answers, the panel does
+not judge them balanced or drifting, since the platform does not set them, and an item's split across
+versions follows the group sizes; the verdict says so instead. If the arm comes from a rotation the
+platform wrote, each bar carries the share the rotation expects (`rotation.expected_shares`), and a
+group more than 10 points away from it, with at least 30 responses, is marked *check*. Everything is
+computed in `balance_view` from the existing status; the page only draws it.
 
 **Phase 3 departs from the design twice.** The template page, if left in the questionnaire, would be
 shown to every participant with its placeholders unfilled, so the generator offers to remove it, with

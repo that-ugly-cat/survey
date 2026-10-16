@@ -135,6 +135,24 @@
       border-radius: 6px; color: #e2e8f0; font-size: 0.82rem;
     }
     .bank-verdict { font-size: 0.82rem; color: #a0aec0; margin-bottom: 0.6rem; }
+    /* balance panel (phase 4) */
+    .bank-verdict.bv-balanced { color: #68d391; }
+    .bank-verdict.bv-drifting { color: #f6c453; }
+    .bv-label { font-size: 0.7rem; color: #718096; text-transform: uppercase; letter-spacing: 0.06em; margin: 0.9rem 0 0.4rem; }
+    .bv-key { display: inline-block; width: 10px; height: 6px; border-radius: 2px; vertical-align: middle; }
+    .bv-arms { display: grid; grid-template-columns: minmax(0, 6rem) minmax(4rem, 1fr) auto; gap: 0.35rem 0.6rem; align-items: center; font-size: 0.8rem; }
+    .bv-arm { display: contents; }
+    .bv-arm-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bv-track { display: flex; height: 8px; background: #0f1117; border-radius: 99px; overflow: hidden; }
+    .bv-done { background: #4a6fa5; height: 100%; }
+    .bv-live { background: #2c4a73; height: 100%; }
+    .bv-num { white-space: nowrap; }
+    .bv-off { margin-left: 0.4rem; font-size: 0.68rem; color: #f6c453; border: 1px solid #6b5a1f; border-radius: 4px; padding: 0 0.3rem; }
+    .bv-strip { display: flex; align-items: flex-end; gap: 2px; height: 48px; padding: 2px; background: #0f1117; border-radius: 6px; }
+    .bv-bar { flex: 1 1 0; min-width: 2px; max-width: 14px; background: #4a6fa5; border-radius: 2px 2px 0 0; }
+    .bv-bar.bv-low { background: #d69e2e; }
+    .bv-gaps { margin-top: 0.2rem; }
+    .bv-key.bv-done, .bv-key.bv-live { height: 6px; }
     /* the regex shares its row with the propose button: it takes what is left,
        and may shrink below its content instead of pushing the button off the card */
     .bank-regex { font-family: monospace; font-size: 0.78rem; flex: 1; width: auto; min-width: 0; }
@@ -146,7 +164,7 @@
     .be-head { display: flex; align-items: center; gap: 0.75rem; margin: 0.4rem 0 0.2rem; flex-wrap: wrap; }
     .be-head .hint { margin: 0; }
     .be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 1.2rem; margin-top: 0.4rem; }
-    @media (max-width: 900px) { .be-layout { grid-template-columns: 1fr; } }
+    @media (max-width: 900px) { .be-layout { grid-template-columns: minmax(0, 1fr); } }
     .be-tabs { display: flex; gap: 0.2rem; border-bottom: 1px solid #2d3148; flex-wrap: wrap; }
     .be-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: #a0aec0; padding: 0.5rem 0.7rem;
               font-size: 0.8rem; cursor: pointer; display: inline-flex; gap: 0.4rem; align-items: center; }
@@ -481,19 +499,41 @@
         {% endif %}
       </div>
       {% if st.completed %}
-      <p class="bank-verdict">
-        {% if st.exposure_max - st.exposure_min <= 1 and st.version_imbalance_max <= 2 %}Balanced:{% else %}Drifting:{% endif %}
-        every item shown {{ st.exposure_min }}–{{ st.exposure_max }} times; the largest gap between an item's versions is {{ st.version_imbalance_max }}.
-      </p>
-      {% if st.arms %}
-      <table>
-        <thead><tr><th>Arm</th><th>Completed</th><th>In progress</th></tr></thead>
+      {% set bv = bank.balance %}
+      <p class="bank-verdict bv-{{ bv.kind }}">{{ bv.text }}</p>
+      {% if bv.arms %}
+      <div class="bv-label">Groups — completed <span class="bv-key bv-done"></span> and in progress <span class="bv-key bv-live"></span>{% if bv.has_expected %}, with the share the rotation expects{% endif %}</div>
+      <div class="bv-arms">
+        {% for a in bv.arms %}
+        <div class="bv-arm">
+          <span class="cond-key bv-arm-name">{{ a.name }}</span>
+          <span class="bv-track" role="img" aria-label="{{ a.name }}: {{ a.completed }} completed, {{ a.in_progress }} in progress">
+            <span class="bv-done" style="width:{{ a.done_width }}%"></span><span class="bv-live" style="width:{{ a.live_width }}%"></span>
+          </span>
+          <span class="bv-num"><span class="count-n">{{ a.completed }}</span>{% if a.in_progress %} <span class="pct">+{{ a.in_progress }}</span>{% endif %}
+            <span class="pct">· {{ a.pct }}%{% if a.expected is not none %} (expected {{ a.expected }}%){% endif %}</span>
+            {% if a.off %}<span class="bv-off" title="More than 10 points from the expected share, with at least 30 responses">check</span>{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+      <div class="bv-label">How often each item was shown ({{ st.exposure_min }}–{{ st.exposure_max }}){% if bv.exposure|selectattr('low')|list %} — items shown less than the rest are marked{% endif %}</div>
+      <div class="bv-strip" role="img" aria-label="Times shown per item, from {{ st.exposure_min }} to {{ st.exposure_max }}">
+        {% for e in bv.exposure %}<span class="bv-bar{% if e.low %} bv-low{% endif %}" style="height:{{ [e.height, 4]|max }}%" title="{{ e.item }}: {{ e.shown }}"></span>{% endfor %}
+      </div>
+      {% if bv.gaps %}
+      <div class="bv-label">Largest gaps between an item's versions{% if bv.from_answers %} (they follow the group sizes){% endif %}</div>
+      <table class="bv-gaps">
+        <thead><tr><th>Item</th><th>Gap</th><th>By version</th></tr></thead>
         <tbody>
-          {% for name, c in st.arms.items() %}
-          <tr><td class="cond-key">{{ name }}</td><td><span class="count-n">{{ c.completed }}</span></td><td><span class="pct">{{ c.in_progress or '—' }}</span></td></tr>
+          {% for g in bv.gaps %}
+          <tr><td class="cond-key">{{ g.item }}</td><td><span class="count-n">{{ g.gap }}</span></td>
+              <td class="pct">{% for lb, n in g.versions.items() %}{{ lb }} {{ n }}{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
           {% endfor %}
         </tbody>
       </table>
+      {% if bv.more_gaps %}<p class="hint">and {{ bv.more_gaps }} more, in the table below.</p>{% endif %}
       {% endif %}
       <details style="margin-top:0.8rem;">
         <summary class="hint" style="cursor:pointer;">Per item</summary>

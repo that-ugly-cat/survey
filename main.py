@@ -1913,12 +1913,14 @@ def _randomization_context(db, survey, slug: str) -> dict:
     banks_data = []
     for i, (bank_id, cfg) in enumerate(bank_rows):
         errors, warnings = flow.bank_findings(schema, pools_flow, cfgs, i)
+        status = banks.status(db, bank_id, cfg, PENDING_ASSIGNMENT_MINUTES)
         banks_data.append({
             "id": bank_id,
             "cfg": cfg,
             "items_json": json.dumps(cfg["items"], indent=1),
             "arms_json": json.dumps(cfg["arms"], indent=1),
-            "status": banks.status(db, bank_id, cfg, PENDING_ASSIGNMENT_MINUTES),
+            "status": status,
+            "balance": banks.balance_view(status, cfg, _rotation_expected(schema, cfg)),
             "errors": errors,
             "warnings": warnings,
         })
@@ -1938,6 +1940,20 @@ def _randomization_context(db, survey, slug: str) -> dict:
         "bank_editor_version": _asset_version("bank-editor.js"),
         "editor_model": _bank_editor_model(schema, pools_flow, bank_rows),
     }
+
+
+def _rotation_expected(schema: dict, cfg: dict):
+    """Expected share per arm when the bank's arm comes from a rotation the platform
+    wrote over these arms, in this order (rotation.py); None otherwise."""
+    if not cfg.get("arm_from"):
+        return None
+    calc = next((c for c in schema.get("calculatedValues") or []
+                 if isinstance(c, dict) and c.get("name") == cfg["arm_from"]), None)
+    parsed = rotation.parse_expression((calc or {}).get("expression") or "")
+    if not parsed or parsed["arms"] != [a["name"] for a in cfg["arms"]]:
+        return None
+    meta = next((q for _, q in flow.all_questions(schema) if q.get("name") == parsed["question"]), {})
+    return rotation.expected_shares(meta, parsed["wave"], parsed["arms"])
 
 
 def _asset_version(name: str) -> str:

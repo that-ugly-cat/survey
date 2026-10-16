@@ -470,6 +470,60 @@ def status(db, bank_id: int, cfg: dict, pending_minutes: int) -> dict:
     }
 
 
+# --- balance panel -------------------------------------------------------------------
+
+def balance_view(st: dict, cfg: dict, expected: dict = None, gaps_shown: int = 5) -> dict:
+    """What the balance panel draws, from status() and the config: one bar per arm, a strip
+    of how often each item was shown, the items whose versions drifted furthest apart, and
+    a verdict in words (docs/item-banks-ui-spec.md, phase 4).
+
+    When the arm comes from the answers (arm_from), the platform does not balance arms, and
+    the version split of an item follows the arm sizes: neither is judged then. If the
+    source is a rotation, `expected` (arm -> percent) is shown beside the actual shares.
+    """
+    completed = st["completed"]
+    from_answers = bool(cfg.get("arm_from"))
+    arm_total = {a: c["completed"] + c["in_progress"] for a, c in st["arms"].items()}
+    top = max(arm_total.values(), default=0) or 1
+    arms = []
+    for name, c in st["arms"].items():
+        pct = round(100 * c["completed"] / completed, 1) if completed else 0.0
+        exp = (expected or {}).get(name)
+        arms.append({"name": name, "completed": c["completed"], "in_progress": c["in_progress"], "pct": pct,
+                     "done_width": round(100 * c["completed"] / top, 1),
+                     "live_width": round(100 * c["in_progress"] / top, 1),
+                     "expected": exp, "off": exp is not None and completed >= 30 and abs(pct - exp) > 10})
+    shown_max = max((it["shown"] for it in st["per_item"]), default=0) or 1
+    exposure = [{"item": it["item"], "shown": it["shown"], "height": round(100 * it["shown"] / shown_max),
+                 "low": it["shown"] < st["exposure_max"] - 1} for it in st["per_item"]]
+    gaps = []
+    for it in st["per_item"]:
+        counts = list(it["versions"].values())
+        gap = (max(counts) - min(counts)) if len(counts) > 1 else 0
+        if gap:
+            gaps.append({"item": it["item"], "gap": gap, "versions": it["versions"]})
+    gaps.sort(key=lambda g: (-g["gap"], g["item"]))
+
+    spread = st["exposure_max"] - st["exposure_min"]
+    times = (f"{st['exposure_min']} times" if not spread
+             else f"{st['exposure_min']}–{st['exposure_max']} times")
+    if from_answers:
+        kind = "answers"
+        text = ("Groups follow the answers, so the platform does not balance them, and an item's split across "
+                f"versions follows the group sizes. Items shown {times}.")
+    elif spread <= 1 and st["version_imbalance_max"] <= 2:
+        kind = "balanced"
+        text = (f"Balanced: every item shown {times}; "
+                f"the largest gap between an item's versions is {st['version_imbalance_max']}.")
+    else:
+        kind = "drifting"
+        text = (f"Drifting: items shown {times}; the largest gap between "
+                f"an item's versions is {st['version_imbalance_max']}. New draws favour the items and versions shown least.")
+    return {"kind": kind, "text": text, "arms": arms, "exposure": exposure,
+            "gaps": gaps[:gaps_shown], "more_gaps": max(0, len(gaps) - gaps_shown),
+            "from_answers": from_answers, "has_expected": bool(expected)}
+
+
 # --- long export ---------------------------------------------------------------------
 
 def long_rows(responses: list) -> tuple[list, list]:
