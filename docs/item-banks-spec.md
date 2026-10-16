@@ -1,6 +1,6 @@
 # Item banks — specification
 
-*9 October 2026. Status: implemented (`banks.py`, wired in `main.py`, `flow.py`, `mcp_app.py`; tested in `test_banks.py`). Where the implementation departs from the draft, the text below says so.*
+*9 October 2026. Status: implemented (`banks.py`, wired in `main.py`, `flow.py`, `mcp_app.py`; tested in `test_banks.py`; `arm_from`, section 15, in `test_arm_from.py`). Where the implementation departs from the draft, the text below says so. The visual editor and its tests are in `docs/item-banks-ui-spec.md`.*
 
 ## 1. The problem
 
@@ -122,6 +122,9 @@ the drawn ones to `assigned_pages`, so the existing loop hides every undrawn ver
 drawn pages into the slots they occupy, in draw order; and it sets `conditions[arm_var] = arm`. A bank
 therefore needs nothing new in `survey.html` beyond carrying its assignment id back on submit, which
 the existing `_assignment_ids` path already does if bank ids are kept distinct (prefix `b`, see 5).
+*As implemented:* the page order's `var` is `arm_var`, or `_bank_<name>` for a bank without arms. Banks
+with `arm_from` (section 15) are the exception: their pages travel in a separate `deferred_banks`
+structure that `survey.html` applies once the answer is known.
 
 ### 4.6 Guarantees, stated as tests
 
@@ -197,9 +200,9 @@ A section **Item banks** on the Randomization page, under the pools:
 
 - **Create**: name, `k`, order, arm variable; items from the naming helper (preview table: item ×
   versions, with unmatched pages listed) or pasted JSON; arms as rows of version quotas, with the sum
-  checked against `k` as it is typed. *As implemented:* items and arms are JSON fields; the sum of
-  each quota is checked in the browser as it is typed, and the server refuses at save with the
-  reasons and the typed values kept.
+  checked against `k` as it is typed. *As implemented:* the visual editor of
+  `docs/item-banks-ui-spec.md`, which writes the same form fields; *Edit as JSON* shows them, and the
+  server refuses at save with the reasons and the typed values kept.
 - **Status**: per arm, completed and in-flight draws. Per item, exposure. Per item×version, counts, with
   the largest imbalance highlighted. A line that answers "is it balanced?" in one sentence.
 - **Reset** and **Delete**, with the same confirmations pools have.
@@ -208,12 +211,13 @@ A section **Item banks** on the Randomization page, under the pools:
 
 ## 8. MCP surface
 
-- `set_bank(slug, config, bank_id=None)`: create or replace; returns validation findings, like
-  `set_pool`.
+- `set_bank(slug, config, bank_id=None)`: create or replace; returns `warnings` (and `errors` when
+  refused), `draws_reset` and an `example` of three draws.
 - `delete_bank(slug, bank_id)`.
 - `bank_status(slug)`: the status of section 7, in numbers, no response content.
 - `preview_flow`: banks multiply the arms by their arm values. Since draws cannot be enumerated, each
-  arm shows **one example draw** marked as an example, and states `k` and the quota.
+  arm shows **one example draw** marked as an example. *As implemented:* the arm is in `condition`, the
+  drawn pages in `assigned_pages`, with `example_draw: true`; `k` and the quota are not repeated.
 - `validate_survey`: the checks of section 9.
 
 ## 9. Validation
@@ -233,15 +237,18 @@ Warnings:
 - question names on version pages that do not follow `<page>_<role>`, which the long export needs to
   line up answers across versions (section 10);
 - an expected exposure below 5 per item×version at the target sample size, when the admin enters one.
+  *Not implemented:* the editor's participant estimate (Draw tab) shows the expected exposure per item
+  but does not warn.
 
 The pool fix travels with this work: **a pool whose `C(n, k)` exceeds 10,000 is refused at save**, with
 the count in the message. Today such a pool saves fine and blocks the server at the first page load.
 
 ## 10. Export
 
-- **Flat export (CSV, XLSX, JSON)**: unchanged columns, plus `_banks.<name>.arm`,
-  `_banks.<name>.items` (items in display order) and `_banks.<name>.versions`.
-- **Long export**, new, one row per response × drawn item: `response_id`, `submitted_at`, `bank`, `arm`,
+- **Flat export (CSV, XLSX)**: unchanged columns, plus `_banks_<name>_arm`, `_banks_<name>_draw_id`,
+  `_banks_<name>_items`, `_banks_<name>_versions` and `_banks_<name>_pages` (lists joined with `;`, in
+  display order). The JSON export keeps `_banks` as a nested object.
+- **Long export** (`export-long.csv` / `.xlsx`), new, one row per response × drawn item: `response`, `submitted_at`, `bank`, `arm`,
   `position`, `item`, `version`, `page`, then one column per **role**, where a role is the question name
   with the page-name prefix removed (`P017_L_quality` → `quality`). This is the table a mixed model
   wants, and it is the reason for the naming rule in section 9.
@@ -308,7 +315,8 @@ before any answer.
    sequence.
 3. **At the submit** the server reads the arm from the stored answers (the question, or the
    calculated value saved with the result) and resolves the draw to that arm: the ledger keeps that
-   arm's sequence only, and the response records it as for any other draw. The browser never states
+   arm's sequence only, and the response records it as for any other draw; the arm is also stored
+   with the answers under `arm_var`. The browser never states
    what it showed; and only an arm the server drew for this person can be chosen. An answer that names
    no arm resolves nothing, and the response records no bank rather than a guess.
 

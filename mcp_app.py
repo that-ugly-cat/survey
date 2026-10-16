@@ -19,9 +19,9 @@ cannot see.
 
 Data. The model never sees a response. No tool returns a payload, an open
 answer or the answers split by randomization arm: what the results surface
-hands over is what a published page would serve, cells under five masked, plus
-the counts the balance needs (how many per arm, how often each question was
-answered). Everything a model reads travels to whoever runs it, under
+hands over is masked as a published page would mask it, cells under five
+hidden, plus the counts the balance needs (how many responses per arm, how
+often each question was answered). Everything a model reads travels to whoever runs it, under
 their terms and not this server's, and the participant notice tells people that
 individual answers are seen only by the people running the study. The owner has
 the export for the rest, and the export does not go through a conversation.
@@ -29,7 +29,8 @@ the export for the rest, and the export does not go through a conversation.
 Writes are guarded rather than free. Editing the schema of a survey that already
 holds responses is refused unless the caller says `force`, because the answers
 already collected were given to the old wording and silently reinterpreting them
-is the one mistake that cannot be undone from a backup. Deleting surveys and
+is the one mistake that cannot be undone from a backup. Pools and item banks have
+no such guard: saving one resets its balance whether or not responses exist. Deleting surveys and
 deleting responses are not exposed at all: they stay in the web admin, where a
 human is holding the mouse.
 
@@ -61,7 +62,8 @@ mcp = MCPServer(
         "with the denominators kept apart. Individual responses and open answers "
         "are not reachable from here by design: the export is the owner's. Reads "
         "are free; confirm with the user before any write, and note that saving a "
-        "pool resets its balance counters, and that publishing a report while the "
+        "pool resets its balance counters and saving an item bank its draws, even "
+        "over collected responses, and that publishing a report while the "
         "survey is still collecting anchors whoever reads it before answering."
     ),
 )
@@ -140,7 +142,8 @@ def list_surveys() -> dict:
 @mcp.tool()
 def get_survey(slug: str) -> dict:
     """Everything about one survey except the schema itself: counts, pools, and
-    the public URL. Use get_schema for the questionnaire JSON."""
+    the public URL. Use get_schema for the questionnaire JSON, and bank_status
+    for its item banks."""
     db = _db()
     try:
         row = _owned(db, slug)
@@ -186,6 +189,11 @@ def preview_flow(slug: str, answers: dict = None) -> dict:
     expression that governs them — pass `answers` to pin values (for example
     {"consent_agree": ["agree"]}, or a rating that opens a follow-up) and see
     what they open.
+
+    Item banks cannot be enumerated: each bank arm appears once, with one example
+    draw from an empty history, marked `example_draw`. For a bank whose arm comes
+    from an answer (`arm_from`) every arm is listed, and pinning that answer does
+    not pick one.
     """
     db = _db()
     try:
@@ -225,7 +233,8 @@ def validate_survey(slug: str) -> dict:
 def randomization_status(slug: str) -> dict:
     """Per pool and per arm: responses completed, and assignments issued but not
     yet submitted. The pending figure counts only the last hour, so a burst of
-    abandoned starts stops distorting the picture once it ages out."""
+    abandoned starts stops distorting the picture once it ages out. Item banks
+    are in bank_status."""
     db = _db()
     try:
         row = _owned(db, slug)
@@ -398,6 +407,8 @@ def set_pool(slug: str, pool_pages: list, pool_name: str = "Pool", show_count: i
     counterbalanced without duplicating pages.
 
     Saving resets this pool's balance counters, exactly as the web admin does.
+    Refused above banks.POOL_COMBINATION_CAP combinations, because a pool enumerates
+    them all at every page load: to sample from a large set, use set_bank.
     """
     db = _db()
     try:
@@ -466,11 +477,13 @@ def set_bank(slug: str, config: dict, bank_id: int = None) -> dict:
     "order": "random" | "fixed", "arm_from": optional}. Each version is a page of the
     schema; a page belongs to one bank at most and never to a pool. Each arm's quota sums
     to show_count. arm_from names a question, or a calculated value saved with the result,
-    whose value picks the arm instead of the balancing (rotations across waves): every
-    arm's sequence is drawn at the page load and the answer chooses one.
+    whose value picks the arm instead of the balancing (rotations across waves): its
+    value must be an arm name; every arm's sequence is drawn at the page load and the
+    answer chooses one.
 
     Refused with the reasons when it would not work; saved with warnings when it would
-    work badly. Saving resets this bank's draws, as saving a pool resets its counters.
+    work badly. Saving resets this bank's draws, as saving a pool resets its counters,
+    and responses already collected do not stop it.
     See docs/item-banks-spec.md.
     """
     db = _db()
@@ -558,10 +571,11 @@ def delete_pool(slug: str, pool_id: int) -> dict:
 
 @mcp.tool()
 def reset_counters(slug: str, pool_id: int = None) -> dict:
-    """Clear balance counters — one pool, or all of them.
+    """Clear the balance counters of one randomization pool, or of all pools.
 
     Do this after testing and before fielding, so the arms start level. It
-    discards assignment history only; responses are untouched.
+    discards assignment history only; responses are untouched. Item-bank draws
+    are not touched: re-saving a bank with set_bank resets those.
     """
     db = _db()
     try:
@@ -606,8 +620,8 @@ def _report_of(row) -> dict:
 
 @mcp.tool()
 def question_summary(slug: str, name: str = None, audience: str = "public") -> dict:
-    """What people answered, as one typed aggregate per question, at the level a
-    published results page would show it.
+    """What people answered, as one typed aggregate per question, masked as the
+    given audience would see it.
 
     This is the same computation the results page draws, handed over as numbers.
     Every aggregate carries three counts that differ under branching and
@@ -619,8 +633,10 @@ def question_summary(slug: str, name: str = None, audience: str = "public") -> d
     `name` restricts to one question. `audience` is "public" or "respondent",
     which today filter alike: cells under five masked, a question under five
     answers reported as below threshold, no open answers, no split by arm. It is
-    also how to check what a published report exposes without opening it in
-    another browser.
+    also how to check what a question would expose without opening a page in
+    another browser. It does not apply the report: a question the report does not
+    publish, or a report not published at all, still comes back here. get_report
+    says what the page carries.
 
     The owner's view is not offered here. Unmasked cells, open text and the
     breakdown by condition stay on the owner's results page and in the export,
@@ -690,12 +706,15 @@ def set_report(slug: str, blocks: list, audience: str = "owner",
 
     `blocks` is an ordered list. Three kinds and no others:
       {"kind": "text", "md": {"en": "## Heading", "it": "## Titolo"}}
-      {"kind": "question", "name": "…", "chart": "bar", "value": "count"}
+      {"kind": "question", "name": "…", "chart": "bar", "value": "count",
+       "sort": "schema" | "frequency", "other": "show" | "hide"}
       {"kind": "all_questions"}
     Each may carry "audience" to travel less far than the report does; the
-    report's own level is the ceiling, and anything unknown — a block kind, an
-    audience, a chart a question's shape cannot take — is dropped rather than
-    stored, because what is stored here is served to strangers.
+    report's own level is the ceiling. Nothing unknown is stored, because what is
+    stored here is served to strangers: unknown block kinds, empty text blocks and
+    question blocks without a name are dropped, an unknown audience is removed (the
+    block inherits), and a chart the question's shape cannot take is replaced by
+    that shape's default.
 
     Publishing beyond the owner while the survey is still **open** is refused
     unless `publish_on_open` is set. Results visible during fielding change what
@@ -709,8 +728,8 @@ def set_report(slug: str, blocks: list, audience: str = "owner",
     Leaving it out keeps whatever is set rather than switching it off.
 
     Open answers never reach a published page whatever this says, and cells
-    under five answers are masked. Use question_summary(audience="public") to
-    see what a reader outside would actually get.
+    under five answers are masked. question_summary(audience="public") gives the
+    masked numbers of any question; which questions a reader gets is the report's.
     """
     if audience not in report_model.RANK:
         return _fail(f"audience must be one of {', '.join(report_model.RANK)}")

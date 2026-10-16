@@ -773,7 +773,7 @@
         action = existing ? "Replace in questionnaire" : "Add to questionnaire";
       }
       box.appendChild(el("div", { class: "be-note" }, [status + " ", el("code", { text: expr })]));
-      box.appendChild(el("p", { class: "hint", text: "For the next wave, copy the survey and change only the wave number here." }));
+      box.appendChild(el("p", { class: "hint", text: "For the next wave, create a new survey from the same schema, paste this bank's JSON into a new bank, and set the wave number here." }));
       if (action) {
         var note = el("span", { class: "hint" });
         box.appendChild(el("div", { class: "count-row" }, [el("button", { type: "button", class: "btn-sm btn-secondary", text: action,

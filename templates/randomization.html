@@ -294,10 +294,10 @@
       <p>This exists so that counterbalancing does not require duplicating pages: duplicated pages would mean duplicated question names, and the same answer landing in two different columns depending on the arm.</p>
 
       <h4>Multiple pools</h4>
-      <p>Each pool is independent. A survey can have a pool for condition assignment (Show = 1, with condition variable) and a separate pool for vignette order (Show = 2, no condition variable) — they run simultaneously and don't interfere.</p>
+      <p>Each pool is independent. A survey can have a pool for condition assignment (Show = 1, with condition variable) and a second pool that sets the order (Show = 1, its own condition variable and a page order), as in the PGT/GGE study — they run simultaneously and don't interfere.</p>
 
       <h4>Saving a pool resets its counters</h4>
-      <p>Any configuration change resets the assignment counts for that pool. Use <strong>Reset</strong> to clear counts without changing the configuration.</p>
+      <p>Every save resets the assignment counts for that pool, even with nothing changed. Use <strong>Reset</strong> to clear counts without changing the configuration.</p>
     </div>
   </div>
 
@@ -581,7 +581,7 @@
       <h4>Items and versions</h4>
       <p>An item is a unit of content; a version is one rendering of it, and <strong>each version is a page of the schema</strong>. Each version keeps its own question names, so an answer always lands in a column that says which item and which version it belongs to.</p>
       <pre>[{"item": "P001", "versions": {"H": "P001_H", "L": "P001_L"}}]</pre>
-      <p><strong>Propose from page names</strong> builds this list from the schema, with a regex whose groups <code>item</code> and <code>version</code> split each page name. Pages that do not match are listed so nothing is left out unnoticed.</p>
+      <p>The visual editor's grid is the usual way to fill this; under <strong>Edit as JSON</strong>, <strong>Propose from page names</strong> builds the list from the schema, with a regex whose groups <code>item</code> and <code>version</code> split each page name. Pages that do not match are listed so nothing is left out unnoticed.</p>
 
       <h4>What a participant gets</h4>
       <p>First an arm, then <strong>Show</strong> items, one version of each, in random or schema order. The pages of the bank that were not drawn are hidden; nothing else moves. A bank never shows two versions of the same item to the same person.</p>
@@ -594,6 +594,9 @@
 
       <h4>Balance</h4>
       <p>The least-used arm is drawn, then the least-shown items, then versions are assigned so that each item moves toward an even split across its versions while the arm's quota is met exactly. As for pools, the count that drives this is completed responses plus draws issued in the last hour.</p>
+
+      <h4>Arm from an answer</h4>
+      <p>For forms that rotate across waves, the arm can come from a question, or a calculated value saved with the result, whose value is an arm name. Every arm's sequence is drawn at the page load and the answer picks one; arms are then as large as the answers make them, not balanced. When the arm is a rotation the platform wrote, the balance panel shows each arm's expected share and marks one more than 10 points away once there are 30 responses.</p>
 
       <h4>Pages and questions</h4>
       <p>A page belongs to at most one bank, and never to a bank and a pool. Name the questions on a version page <code>&lt;page&gt;_&lt;role&gt;</code> (<code>P001_H_quality</code>): the long export strips the page name and lines the answers up by role across versions.</p>

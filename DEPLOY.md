@@ -14,6 +14,9 @@ two-factor authentication (TOTP) is mandatory for everyone.
 | `ADMIN_PASSWORD` | first run | `admin` | bootstrap admin's initial password |
 | `DB_PATH` | no | `/data/survey.db` | path to the SQLite file |
 | `UPLOADS_PATH` | no | `/data/uploads` | path to per-survey and shared file uploads |
+| `AUTH_MODE` | no | `local` | `local` (own password and TOTP) or `gateway` (researcher identity from an upstream `forward_auth` gate) |
+| `BORANT_TRUSTED_PROXY` | in gateway mode | `127.0.0.1` | comma-separated addresses or CIDRs whose identity headers are believed; under Docker, the bridge gateway |
+| `BORANT_LOGOUT_URL` | no | `https://id.borant.eu/logout` | where "log out" leads in gateway mode |
 | `PUBLIC_URL` | for MCP | — | the public origin, e.g. `https://survey.example`. The MCP transport checks Host headers against DNS rebinding, so without this every proxied `/mcp` request is refused |
 
 Generate the two keys:
@@ -44,8 +47,12 @@ upgrading (§7) and the whole thing is reversible by restoring the file.
 ```bash
 pip install -r requirements.txt
 cp .env.example .env   # set SECRET_KEY, FERNET_KEY, ADMIN_EMAIL / ADMIN_PASSWORD
-uvicorn main:app --host 0.0.0.0 --port 8000
+python dev-run.py      # reads .env, database under ./data, port 8001
 ```
+
+The app itself never reads `.env`. To run `uvicorn main:app` directly, export the variables
+yourself and point `DB_PATH` and `UPLOADS_PATH` somewhere writable: their defaults are under
+`/data`, which exists only in the container.
 
 ## 3. Docker
 
@@ -82,11 +89,12 @@ never touched:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` for its last section; in a container without it that one
-section fails while everything else passes.
+section fails while everything else passes. `test_bank_editor.js` needs node too, and runs
+outside the container (`node test_bank_editor.js`).
 
 ## 5b. The MCP endpoint
 
@@ -98,7 +106,7 @@ Two things have to be right at deploy time:
   request.
 - **The proxy passes `/mcp` through.** It carries its own key, so it must not sit behind the
   SSO gate: an assistant cannot complete an interactive sign-in. Under `AUTH_MODE=gateway`,
-  add `/mcp /mcp/*` to the public prefixes alongside `/s/*` and `/uploads/*`.
+  add `/mcp /mcp/*` to the public prefixes alongside `/s/*`, `/static/*` and `/uploads/*`.
 
 Check it answers, with a key from `/admin`:
 
@@ -117,9 +125,14 @@ data (§1), so the backup is the rollback.
 ```bash
 cd /opt/apps/survey
 cp data/survey.db "data/survey.db.bak-$(date +%Y%m%d-%H%M%S)"
-git pull
+git pull --ff-only
 docker compose up -d --build
 ```
+
+If Cloudflare (or another cache) sits in front, it may keep serving `/static/*` after a
+deploy. `bank-editor.js` is linked with a hash of its content (`?v=`), so a new version
+reaches browsers at once; the vendored libraries (SurveyJS, Chart.js) carry no version, so
+upgrading one needs a new filename or a cache purge.
 
 `data/` (SQLite + uploads) and `.env` are gitignored — `git pull` never touches them.
 
@@ -165,6 +178,11 @@ prefix and the questionnaire still loads while every image in it silently
 redirects to a sign-in page. No survey references it today, which is exactly
 what makes it a trap: it arms itself the next time somebody adds a picture.
 
+**`/static/*` stays open for the same reason, and gating it fails loudly.** SurveyJS
+is vendored there rather than loaded from a CDN, and so is the results page's
+Chart.js: behind the gate, the questionnaire page arrives without the code that
+draws it. `/guide` is open so the user guide can be linked from outside.
+
 **`/mcp` and `/mcp/*` have to be public as well, for a different reason.** It is not open: it
 carries its own per-user key and refuses without one. But it cannot sit behind
 the gate, because an assistant cannot complete an interactive sign-in — put it
@@ -172,7 +190,7 @@ there and every call comes back as a redirect to a login page.
 
 ```
 survey.example.com {
-    @public path /s/* /uploads/* /mcp /mcp/* /login /register /logout /2fa /api/2fa/*
+    @public path /guide /s/* /uploads/* /static/* /mcp /mcp/* /login /register /logout /2fa /api/2fa/*
     handle @public {
         import noforge
         import nocookie

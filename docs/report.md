@@ -19,7 +19,7 @@ The numbers live in `responses` and are computed on request.
 ```jsonc
 {
   "audience": "owner",          // how far this report may reach: owner | respondent | public
-  "updated_at": "2026-09-21",
+  "explore": false,             // readers may cross two published questions (§11)
   "blocks": [
     {"kind": "text", "audience": null,                        // null = inherit the report's
      "md": {"default": "## What we found", "it": "## Cosa abbiamo trovato"}},
@@ -54,7 +54,6 @@ Three, ordered, each seeing strictly less than the one before:
 | open text answers | yes | no | **never** |
 | breakdown by randomization arm | yes | no | no |
 | n, and how many skipped | yes | yes | yes |
-| timing, funnel, abandonment | yes | no | no |
 | their own answer marked | — | yes | — |
 | cells below the disclosure threshold | shown | suppressed | suppressed |
 
@@ -77,14 +76,13 @@ Inselspital told me" consented to that sentence being on the open web.
   group grows, smallest first, until it holds at least two cells summing to at least the
   threshold. Cells at zero stay visible, because they name nobody and add nothing to the
   group. (Found by running the module over six real responses, not by thinking about it.)
-- **Arms stay private while fielding.** The pooled result is a finding; the breakdown by
-  condition is the experimental manipulation, and it is nobody's business until the study is
-  written up.
+- **Arms stay with the owner.** The pooled result is a finding; the breakdown by condition is
+  the experimental manipulation, and no other audience gets it, during fielding or after.
 - **`_panel_token`, `_assignment` and `_assignment_ids` never reach any rendered page**, at
   any level, including the owner's. They are reconciliation data, and the owner has the
   export.
 - **Anchoring.** Results visible while the survey is open change what later respondents
-  answer. Publishing a report on an open survey is allowed and the manage page says the
+  answer. Publishing a report on an open survey is allowed and the report editor says the
   consequence in the moment you switch it on, in the same register the schema-edit guard uses.
   Whoever runs the study decides; nobody decides it by accident.
 - **Markdown is rendered server-side with raw HTML disabled.** The blocks are owner-authored,
@@ -98,7 +96,7 @@ allowed to decide what a question type means.
 
 | type | stored value | aggregate | default chart |
 |---|---|---|---|
-| `radiogroup`, `dropdown` | string | counts per choice | horizontal bar, sorted |
+| `radiogroup`, `dropdown` | string | counts per choice | horizontal bar, schema order (frequency on request) |
 | `checkbox`, `tagbox` | array | counts per choice, **% of respondents** | horizontal bar |
 | `boolean` | bool | two counts | segmented bar |
 | `rating` | number | distribution + mean, median, SD | discrete distribution |
@@ -106,12 +104,12 @@ allowed to decide what a question type means.
 | `matrixdropdown` | `{row: {col: v}}` | per column, recursing on cell type | one panel per column |
 | `matrixdynamic`, `paneldynamic` | array of objects | per column over all rows, plus rows-per-respondent | per column, plus a distribution |
 | `ranking` | ordered array | position counts per item, mean rank | stacked bar of positions |
-| `imagepicker` | string | counts per choice | bar with the thumbnail as label |
+| `imagepicker` | string | counts per choice | horizontal bar |
 | `text` (number), `expression` | number | histogram bins + summary | distribution |
-| `text` (date) | date | counts per period | timeline |
-| `text` (short) | string | count answered only | none — listed, owner only |
+| `text` (date) | date | counts per day | timeline |
+| `text` (short) | string | count, median length | none — listed, owner only |
 | `comment` | string | count, median length | none — listed, owner only |
-| `panel` | — | walked through: its children are the questions | — |
+| `panel` | — | walked through: its children are the questions (the editor's question list does not yet look inside panels; `all_questions` does) | — |
 | `html` | — | nothing | — |
 
 Rules that apply across the table:
@@ -132,14 +130,13 @@ Rules that apply across the table:
 
 ## 5. Liveness
 
-The document is stable, the numbers are live. The server computes aggregates and caches them
-per `(survey, filter, audience)`, invalidated on submit; the page re-reads them on an interval
-and stamps *updated at*. No websockets, no push: a results page is a document that refreshes,
-not an application.
+The document is stable, the numbers are live. The server builds each page payload and caches
+it per survey, audience, locale and arm split for 20 seconds, dropped on submit and on every
+report or schema save; the page re-reads it every 30 seconds and stamps *updated at*. No
+websockets, no push: a results page is a document that refreshes, not an application.
 
-Locale is deliberately **not** part of that key. Aggregates hold stored values and no labels,
-so one cached copy serves every language and the label lookup happens at render time against
-the schema.
+Locale is part of the key because the cached payload already carries its labels. The view that
+marks a respondent's own answers is never cached: it is theirs, and it is rare.
 
 ## 6. Rendering
 
@@ -149,8 +146,10 @@ thing that fails exactly there. Consequence accepted: canvas does not save as SV
 publication-quality figures stay a separate door for later, and analysis stays where it
 already happens.
 
-Five primitives cover the table above: horizontal bar, segmented bar, discrete distribution,
-summary strip, timeline. Everything also has a **table view** underneath it, rendered by the
+The charts on offer are bar, column, pie, segmented, stacked, grouped, histogram, line, list
+and table; which of them a question can take depends on its shape, default first
+(`report.CHARTS`). Numeric questions are always drawn as a histogram and dates as a line,
+whatever the block asks. Everything also has a **table view** underneath it, rendered by the
 server into the HTML. That table is what makes the page readable with JavaScript off, and it
 is the thing a co-author actually copies.
 
@@ -190,7 +189,7 @@ identifier in a URL people paste to each other.
 
 ## 8. The editor
 
-Lives on the manage page beside Randomization and Files. Starts empty, with one button that
+Its own page, opened from the manage page with **Results report**. Starts empty, with one button that
 inserts the `all_questions` block — the one-click case. Blocks reorder by **dragging and by
 up/down buttons**, both: the arrows work from the keyboard and on a phone, the drag is for a
 mouse. Both are hand-written, because this app has no build step.
@@ -215,8 +214,8 @@ Two notes for whoever writes the renderer:
 
 - More than one report per survey. The audience levels on blocks cover what several reports
   would, and nobody maintains three documents.
-- Cross-tabs and significance tests. This page is for monitoring and for showing; inference
-  stays in R.
+- Cross-tabs for export, and significance tests beyond the exploratory panel of §11. This page
+  is for monitoring and for showing; inference stays in R.
 - Word clouds on open text. They look like analysis and count words. Open answers belong in
   AutoCode, and a button that sends them there is worth more than a picture.
 - Figure export for papers. Separate door, matplotlib, later.
@@ -224,9 +223,10 @@ Two notes for whoever writes the renderer:
 ## 10. What this touches elsewhere
 
 The aggregation module is also the body of three MCP tools, so the same numbers reach a
-conversation without a browser — the reason `preview_flow` exists. `question_summary` returns
-the aggregates, and takes an `audience`, which makes "what would the public see" answerable
-without publishing anything. `get_report` and `set_report` read and replace the document,
+conversation without a browser. `question_summary` returns the aggregates of every question,
+masked for the `respondent` or `public` level (the owner's level is refused), which makes "what
+would the public see of this question" answerable without publishing anything. It does not
+apply the report: a question the report keeps back still comes back there. `get_report` and `set_report` read and replace the document,
 with the same normalisation the editor's save goes through and one guard of their own:
 publishing beyond the owner while the survey is still collecting is refused unless the caller
 says `publish_on_open`.

@@ -92,7 +92,7 @@ STRINGS = {
         "explore_public_hint": "For citizen science: anyone reading the page can pick "
                                "two published questions and see whether they move "
                                "together. They get the test and the effect size; cells "
-                               "under five people stay hidden, and twenty people must "
+                               "under five people stay hidden, and ten people must "
                                "have answered both before anything is shown.",
         "explore_how": "How to read the result", "explore_back": "back",
         "everyone": "everyone", "by": "by",
@@ -166,7 +166,7 @@ STRINGS = {
         "explore_public_hint": "Per la citizen science: chi legge la pagina può scegliere "
                                "due domande pubblicate e vedere se si muovono insieme. "
                                "Ottiene il test e l'ampiezza dell'effetto; le celle sotto "
-                               "le cinque persone restano nascoste, e servono venti "
+                               "le cinque persone restano nascoste, e servono dieci "
                                "persone che abbiano risposto a entrambe.",
         "explore_how": "Come si legge il risultato", "explore_back": "indietro",
         "everyone": "tutti", "by": "per",
@@ -237,7 +237,7 @@ STRINGS = {
         "explore_public_hint": "Für Citizen Science: wer die Seite liest, kann zwei "
                                "veröffentlichte Fragen wählen und sehen, ob sie "
                                "zusammenhängen. Test und Effektstärke ja, Zellen unter "
-                               "fünf Personen nein, und erst wenn zwanzig Personen beide "
+                               "fünf Personen nein, und erst wenn zehn Personen beide "
                                "beantwortet haben.",
         "explore_how": "Wie das Ergebnis zu lesen ist", "explore_back": "zurück",
         "everyone": "alle", "by": "nach",
@@ -307,7 +307,7 @@ STRINGS = {
         "explore_public_hint": "Pour la science participative : qui lit la page peut "
                                "choisir deux questions publiées et voir si elles varient "
                                "ensemble. Le test et la taille d'effet oui, les cellules "
-                               "de moins de cinq personnes non, et vingt personnes "
+                               "de moins de cinq personnes non, et dix personnes "
                                "doivent avoir répondu aux deux.",
         "explore_how": "Comment lire le résultat", "explore_back": "retour",
         "everyone": "tout le monde", "by": "par",

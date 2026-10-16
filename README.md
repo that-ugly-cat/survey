@@ -32,6 +32,23 @@ or JSON.
   A pool can also **counterbalance presentation order**: alongside the condition it assigns,
   an optional page-order map reshuffles named pages into the positions they already occupy,
   so a crossover arm needs no duplicate pages — and therefore no duplicate question names.
+- **Item banks** — for designs a pool cannot express: each participant sees *k* items drawn
+  from a larger set, each in one of its versions, with version shares fixed per arm by
+  quotas. The arm comes from the balancing or, for parallel forms that rotate across waves,
+  from an answer or a calculated value (`arm_from`). Configured in a visual editor that
+  checks against the save rules as you type, builds a rotation's expression from its
+  parameters, generates the version pages from a template page and a pasted table, and,
+  once responses come in, draws a balance panel. A **long export** (one row per item shown)
+  sits beside the wide one.
+- **Link tags** — up to five named query parameters on the public link (`?channel=mail`),
+  recorded with the response; the response id leads every wide export as `_response`, the
+  key for joining it with the long export.
+- **Results and report** — an owner's results page, a report composed from blocks, and a
+  public results page with an embeddable version and a JSON feed, each block shown to the
+  owner, to respondents or to anyone with the link, with cells under five masked before
+  they leave the owner's view.
+- **Participant notice** in EN/DE/FR/IT, linked from every questionnaire, and an in-app
+  guide at `/guide`.
 - **MCP surface** at `/mcp` — read a questionnaire, walk every randomization arm, validate
   the schema, and write back, from inside an assistant conversation. Two tools do the work
   the admin UI cannot: `preview_flow` reports what a participant in each arm actually sees,
@@ -72,14 +89,16 @@ git clone https://github.com/that-ugly-cat/survey.git
 cd survey
 pip install -r requirements.txt
 cp .env.example .env   # set SECRET_KEY, FERNET_KEY, ADMIN_EMAIL / ADMIN_PASSWORD
-python dev-run.py      # or: uvicorn main:app --reload
+python dev-run.py
 ```
 
 `dev-run.py` reads `.env` by hand and points the database at `./data/`, which is gitignored.
 The app itself has no dotenv dependency: in production the environment comes from Docker's
 `env_file`, and this script is the only thing outside the container that reads a file.
+Running `uvicorn main:app` directly needs the variables exported by hand, and `DB_PATH` /
+`UPLOADS_PATH` pointed somewhere writable: their defaults are under `/data`.
 
-Open http://localhost:8001/ for the landing page, then register or sign in. The first
+Open http://localhost:8001/ (the port of `dev-run.py`; set `PORT` to change it) for the landing page, then register or sign in. The first
 login walks you through 2FA enrolment.
 
 ## Running a panel field
@@ -133,7 +152,8 @@ From there:
 
 ## Checks
 
-Thirteen self-contained scripts, no test framework and no running server. They build their own
+Twenty-one self-contained Python scripts and one node script, no test framework and no
+running server. They build their own
 temporary database, so they never touch real data:
 
 ```bash
@@ -142,6 +162,9 @@ python test_panel.py && python test_panel_migration.py && python test_purge.py
 python test_edit_guard.py && python test_review.py
 python test_aggregate.py && python test_report.py && python test_results.py
 python test_stats.py && python test_explore.py && python test_banks.py
+python test_arm_from.py && python test_bank_check.py && python test_rotation.py
+python test_pagegen.py && python test_balance.py && python test_notice.py
+python test_url_tags.py && node test_bank_editor.js
 ```
 
 `test_banks.py` covers item banks: allocation balance simulated over 300 participants, quotas, tie-breaking, six simultaneous arrivals, the pending window, validation, the round trip through the page load and the submit (including a forged `_banks` being discarded), the long export, the admin and MCP surfaces, and the guard on pools whose combinations would block the server. `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -166,16 +189,25 @@ page carries its numbers in the HTML so it reads with JavaScript off.
 `test_stats.py` checks the distributions against published critical points rather than
 against themselves, and `test_explore.py` checks which test gets picked for which pair of
 shapes, on fixtures whose answer is known before the code runs.
+`test_arm_from.py` covers banks whose arm comes from the answers: one draw per arm at the page
+load, resolved at submit from the stored answers. `test_bank_check.py`, `test_rotation.py`,
+`test_pagegen.py` and `test_balance.py` cover the server side of the visual bank editor — the
+check that saves nothing, the rotation expression, the page generator with its dry run and its
+guard over collected answers, and the balance panel — and `test_bank_editor.js` the editor's
+pure functions, against the same expected strings. `test_notice.py` holds the participant
+notice to its factual claims (no cookies, no browser storage, nothing from a third party), and
+`test_url_tags.py` covers link tags and the response id in the exports.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags; do python test_$t.py || exit 1; done"
 ```
 
 `test_page_order.py` needs `node` on the path for its last section; without it that one
-section fails while everything else passes.
+section fails while everything else passes. `test_bank_editor.js` runs under node only, so it
+stays outside the container loop.
 
 ## The MCP surface
 
@@ -196,7 +228,8 @@ all-or-nothing: anything else still configured with the old one stops working to
 `https://your-domain/mcp/k/<key>` for clients that cannot send headers. `PUBLIC_URL` must be
 set, or the transport's DNS-rebinding check refuses every proxied request.
 
-**Reading.** `list_surveys`, `get_survey`, `get_schema`, `randomization_status`, and
+**Reading.** `list_surveys`, `get_survey`, `get_schema`, `randomization_status`, `bank_status`
+(draws per arm, item and version), and
 `response_stats` (responses per arm, median duration, how often each question was answered),
 whose `never_answered` list is the quick way to find a branch nobody reaches.
 
@@ -221,7 +254,7 @@ placeholder choice values that make an export unreadable, pool pages that do not
 arms that reach no questions.
 
 **Writing, with guards.** `create_survey`, `update_schema`, `set_pool`, `delete_pool`,
-`reset_counters`, `set_active`, `set_report`. Four guards matter:
+`set_bank`, `delete_bank`, `reset_counters`, `set_active`, `set_report`. Four guards matter:
 
 - A schema with structural errors is refused. Pass `force` to override.
 - Editing the schema of a survey that already holds responses is refused unless forced: those
@@ -254,8 +287,15 @@ report.py         — the report: ordered blocks, per-block audience, what may b
 results.py        — aggregates → labelled chart payloads and rendered text, per language
 stats.py          — the distribution tails the exploration needs, and nothing else
 explore.py        — two variables at a time: the test picked from their shapes
-static/           — Chart.js, vendored at one version rather than pulled from a CDN
 aggregate.py      — answers → one typed aggregate per question, and who may see it
+flow.py           — expressions, arm preview and schema validation (shared by admin and MCP)
+mcp_app.py        — the MCP surface at /mcp
+banks.py          — item banks: allocation, arm_from, status, balance panel, long export
+rotation.py       — the expression for forms rotating across waves, and its expected shares
+pagegen.py        — version pages from a template page and a table
+notice.py         — the participant notice, in four languages
+map_borant.py     — one-off linking of local accounts to Borant ID before AUTH_MODE=gateway
+static/           — SurveyJS, Chart.js and the bank editor, vendored rather than pulled from a CDN
 templates/        — landing, twofa, admin, manage, admin_users, profile, survey, …
 static-data/      — reference JSON (cantons, countries) to upload via the file manager
 test_panel.py     — end-to-end checks: panel entry/return, one-use tokens, assignment ledger
@@ -304,8 +344,9 @@ instead of the local password, and `/login` and `/register` switch themselves
 off.
 
 **Respondents never meet it.** A questionnaire is answered by people with no
-account here, so `/s/{slug}`, its submit route and `/uploads/*` all stay open —
-the last one matters because questions can reference uploaded files, and the
+account here, so `/s/{slug}`, its submit route, `/static/*` and `/uploads/*`
+all stay open. `/static/*` carries the questionnaire's own code (SurveyJS);
+`/uploads/*` matters because questions can reference uploaded files, and the
 shared canton/country lists live there.
 
 If you turn it on, configure the gate for **two factors**: this app enforces its

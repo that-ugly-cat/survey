@@ -274,7 +274,7 @@
       <p>The value comes from the optional value map, or is the page name itself when no map is
         set. A map turns page names into something readable:</p>
       <pre>{"info_a": "control", "info_b": "treatment"}</pre>
-      <p>Changing a pool's configuration clears its balance history, since the old counts no
+      <p>Saving a pool clears its balance history, since the old counts no
         longer describe the new set of combinations.</p>
 
       <h4>Files</h4>
@@ -291,8 +291,8 @@
   "imageLink": "/uploads/{{ slug }}/diagram.png"
 }</pre>
       <p>The reference data shipped with the platform (cantons and countries, in EN, DE, FR and
-        IT) is uploaded the same way and can then be reused across surveys, which is how a
-        country drop-down gets its options without hard-coding them into every schema.</p>
+        IT) is served to every survey from <code>/uploads/shared/</code>, so you do not upload it:
+        that is how a country drop-down gets its options without hard-coding them into every schema.</p>
     </div>
   </div>
 
@@ -411,7 +411,7 @@
       </div>
       <div class="config-item">
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/randomization">Randomization</a>
-        <span class="config-desc">{{ pool_count }} pool{{ '' if pool_count == 1 else 's' }} configured</span>
+        <span class="config-desc">{{ pool_count }} pool{{ '' if pool_count == 1 else 's' }}{% if bank_count %}, {{ bank_count }} item bank{{ '' if bank_count == 1 else 's' }}{% endif %} configured</span>
       </div>
       <div class="config-item">
         <a class="btn btn-blue" href="/admin/surveys/{{ slug }}/files">Files</a>

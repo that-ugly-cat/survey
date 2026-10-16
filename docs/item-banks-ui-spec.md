@@ -59,8 +59,9 @@ and without breaking what the engine guarantees.
 3. **Show what a participant gets**, not only the configuration: an example draw per arm is always on
    screen.
 4. **Writing the schema is a separate act.** The bank editor never changes the questionnaire silently.
-   The two features that do (generating pages, adding a calculated value) say what they will add, and are
-   refused once responses exist, as the schema edit already is.
+   The two features that do (generating pages, adding a calculated value) say what they will add. Over
+   collected responses they answer 409 `responses_held` with the count; the editor asks, and resends with
+   `confirm: true`, which writes and logs a warning, the same rule the schema editor applies with its box.
 5. **No new dependencies.** Plain HTML, the admin's CSS, a few hundred lines of script, as in the rest
    of the admin.
 
@@ -97,25 +98,34 @@ in that version.
   row count, so an incomplete item is visible before save, not only after.
 - **Search** filters rows; a counter says *48 items · 3 versions · 2 cells empty*.
 
+*As built:* each cell is a native select of all pages, those held by a pool or another bank disabled and
+labelled, those already used in this bank labelled; rows move with up and down buttons, not by drag.
+**Fill from page names** takes a regex under *Naming pattern* and keeps families of two or more versions,
+listing lone matches as left out (the server's helper behind *Edit as JSON* keeps single-version items).
+A row is shaded only when a group's quota uses a label the item lacks; the "drawn less often" warning is
+among the server's findings.
+
 **Generate pages from a table** (button above the grid) covers the case where the pages do not exist
 yet, which is the case every time so far. It is a three-step dialog:
 
 1. **Template page**: any page of the schema. Text inside it can carry placeholders in double braces
-   (`{{text}}`, `{{source}}`) in titles, descriptions and HTML.
-2. **Table**: paste from a spreadsheet or upload a CSV. Required columns `item` and `version`; every
-   other column fills the placeholder of the same name. Unknown placeholders and unused columns are
-   listed.
+   (`{{text}}`, `{{source}}`) in any text of the page; `{old}` references inside it are renamed too.
+2. **Table**: paste from a spreadsheet or upload a CSV (tabs, commas or semicolons). Required columns
+   `item` and `version`; every other column fills the placeholder of the same name. A placeholder with
+   no column is an error, an unused column a note. Items take letters, digits, `-` and `_`; versions
+   no underscore; at most 2000 rows.
 3. **Preview and add**: three generated pages rendered as the participant sees them; the names that will
    be created (`<item>_<version>`, questions `<page>_<role>`, the convention the long export expects); the
-   count; where they will be inserted (after the template, by default). *Add N pages* writes the schema and
-   fills the grid. The template page itself is left untouched, so it can be removed or kept as a preview.
+   count; where they will be inserted (always right after the template). *Add N pages* writes the schema
+   and fills the grid. The template page is removed by default: a ticked box, with the consequence of
+   keeping it stated beside it.
 
 This is generation at authoring time, not templating at runtime: section 2 of the engine spec set the
 latter aside for good reasons, and nothing here revisits them. Each version is still a page.
 
 ### ② Draw
 
-- **Items per participant** (`show_count`): a stepper, with *of 48* beside it.
+- **Items per participant** (`show_count`): a number from 1 to 50, with *of 48* beside it.
 - **Order**: *random for each participant* or *as in the questionnaire*.
 - One line of consequence: *each participant answers 20 of 48 items; with 300 participants each item is
   shown about 125 times.* The sample size is a field the author can change; it is used only for this line.
@@ -140,31 +150,34 @@ it matches, red with the difference otherwise. *Add group*; the arm name is edit
    then follow the answers.
 3. **Rotation across waves** — a helper for the case that prompted `arm_from`. It asks for the question
    that every wave shares (for example the day of birth of the personal code), the **wave number of this
-   questionnaire**, and the number of forms (the groups). It shows:
+   questionnaire** (from 1), and the name of the calculated value (default `form`); the groups are the
+   bank's arms, in order, at least two. It shows:
    - the rotation table (*wave 1 → wave 2 → wave 3* for each starting form);
    - the expected split: for a day of birth, the share per form weighted by how often each day occurs in
      a year (the 31st exists in seven months), which gives 32.6 / 32.6 / 34.8% rather than a third each;
    - the calculated value it will add, in words and as an expression.
 
-   *Add to questionnaire* writes the calculated value (`includeIntoResult: true`) and sets
-   `arm_from` to it. For the next wave, the author copies the survey and changes only the wave number,
-   here.
+   *Add to questionnaire* (*Replace in questionnaire* when the name exists) writes the calculated value
+   (`includeIntoResult: true`) and sets `arm_from` to it. For the next wave, the author creates a new
+   survey from the same schema, pastes the bank's JSON into a new bank, and changes the wave number here
+   (there is no copy-survey action yet).
 
 ### ④ Check & save
 
-- **Findings** from the server, errors first, each with a link to the tab and cell it concerns.
+- **Findings** from the server, errors first, each with a link to the tab it concerns (guessed from the
+  message).
   Errors disable *Save*; warnings need to be read, not acknowledged one by one.
 - **What saving does**, stated before the button: *saving resets the draws of this bank (12 draws, 0
   responses)*. With responses on record, the button changes to *Save and reset draws* and asks for the
   bank name to be typed, as deleting does elsewhere.
-- **Preview the walk**: a link that opens the flow preview (`preview_flow`) for each arm.
+- **Preview the walk**: a link that opens the flow preview (`preview_flow`) for each arm. *Not built.*
 
 ### Side panel: example draw
 
 Always visible, refreshed after each change (debounced): for each arm, the drawn pages as chips in
-order, coloured by version, with the item name. It is labelled *example: a draw from an empty history,
-not the next participant's*, the same wording as the MCP. For an `arm_from` bank it shows one draw per
-possible answer value.
+order, coloured by version, with the item name. It reads *From an empty history, not the next
+participant's* and *One per group.* For an `arm_from` bank that is one draw per arm, the only answer
+values that resolve.
 
 ### After fielding: balance
 
@@ -176,15 +189,21 @@ largest version gap listed first. Counts only, as today; no response content.
 
 | Endpoint | Purpose | Writes |
 |---|---|---|
-| `GET /admin/surveys/{slug}/randomization/bank/{id}/model` | the config, the schema's pages (name, title, owner pool or bank), questions and calculated values with their page index, response and draw counts | — |
-| `POST …/bank/{id}/check` | a config in, `flow.bank_findings` and `banks.example_draw` out; nothing saved | — |
-| `POST …/bank/{id}/save` | as today, accepting JSON as well as the form | bank config |
-| `POST /admin/surveys/{slug}/generate-pages` | template page + table → pages inserted into the schema | schema |
-| `POST /admin/surveys/{slug}/calculated-values` | add or replace one calculated value | schema |
+As built (the design had a separate `model` endpoint and a general calculated-values route; both were
+dropped):
 
-The two schema writes go through the same guard as the schema editor (`test_edit_guard.py`): refused
-once the survey holds responses. `check` and `model` are read-only and owner-scoped like every admin
-route. The MCP gains nothing it lacks: `set_bank`, `validate_survey` and `update_schema` already cover
+| Endpoint | Purpose | Writes |
+|---|---|---|
+| `POST …/randomization/bank/{id}/check` | JSON config in → `{errors, warnings, example}` (`example` empty while there are errors); 401 `not_signed_in`, 404 `not_found`, 400 `unreadable_config` | — |
+| `POST …/randomization/bank/{id}/save` | form post, unchanged | bank config |
+| `POST /admin/surveys/{slug}/generate-pages` | `{template, table, remove_template, dry_run?, confirm?}` → the plan (dry run) or pages written after the template | schema |
+| `POST /admin/surveys/{slug}/randomization/rotation` | `{name, question, wave, arms, confirm?}` → the expression built by the server, added or replaced | schema |
+
+The editor's model (pages with owner and placeholders, questions with their page index, calculated
+values with any recognised rotation) is rendered into the page. Over collected responses both schema
+writes answer 409 `responses_held` with the count, and write with `confirm: true`, logging a warning
+(tests in `test_rotation.py` and `test_pagegen.py`). `check` is read-only and owner-scoped like every
+admin route. The MCP gains nothing it lacks: `set_bank`, `validate_survey` and `update_schema` already cover
 these operations for an assistant.
 
 ## 5. What it does not do
