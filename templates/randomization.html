@@ -18,7 +18,7 @@
     header .sub   { font-size: 0.78rem; color: #718096; }
     header a { font-size: 0.78rem; color: #718096; text-decoration: none; }
     header a:hover { color: #a0aec0; }
-    main { max-width: 820px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+    main { max-width: 1100px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
 
     .pool-card {
       background: #1a1d27; border: 1px solid #2d3148; border-radius: 10px;
@@ -141,6 +141,57 @@
     .count-row { flex-wrap: wrap; }
     .arms-ok { color: #68d391; }
     .arms-bad { color: #fc8181; }
+
+    /* visual bank editor (static/bank-editor.js) */
+    .be-head { display: flex; align-items: center; gap: 0.75rem; margin: 0.4rem 0 0.2rem; flex-wrap: wrap; }
+    .be-head .hint { margin: 0; }
+    .be-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 1.2rem; margin-top: 0.4rem; }
+    @media (max-width: 900px) { .be-layout { grid-template-columns: 1fr; } }
+    .be-tabs { display: flex; gap: 0.2rem; border-bottom: 1px solid #2d3148; flex-wrap: wrap; }
+    .be-tab { background: none; border: 0; border-bottom: 2px solid transparent; color: #a0aec0; padding: 0.5rem 0.7rem;
+              font-size: 0.8rem; cursor: pointer; display: inline-flex; gap: 0.4rem; align-items: center; }
+    .be-tab[aria-selected=true] { color: #e2e8f0; border-bottom-color: #4a6fa5; }
+    .be-badge { font-size: 0.68rem; border-radius: 8px; padding: 0 0.4rem; line-height: 1.1rem; }
+    .be-badge.ok { background: #1e3a2a; color: #68d391; }
+    .be-badge.bad { background: #3b1d24; color: #fc8181; }
+    .be-badge.warn { background: #3a311a; color: #f6c453; }
+    .be-panel { padding: 0.9rem 0 0.2rem; }
+    .be-panel .count-row { margin-top: 0.6rem; }
+    .be-search { flex: 1; min-width: 8rem; width: auto; }
+    .be-adv { margin-top: 0.5rem; }
+    .be-adv summary { cursor: pointer; }
+    .be-grid { max-height: 360px; overflow: auto; border: 1px solid #2d3148; border-radius: 8px; margin-top: 0.4rem; }
+    .be-grid table { font-size: 0.8rem; }
+    .be-grid th, .be-grid td { padding: 0.3rem 0.4rem; white-space: nowrap; }
+    .be-grid thead th { position: sticky; top: 0; background: #1a1d27; z-index: 1; }
+    .be-short td { background: #241f14; }
+    .be-cell, .be-item, .be-label, .be-num, .be-var {
+      background: #0f1117; border: 1px solid #2d3148; border-radius: 5px; color: #e2e8f0; font-size: 0.78rem; padding: 0.25rem 0.35rem;
+    }
+    .be-cell { font-family: monospace; max-width: 11rem; }
+    .be-item { font-family: monospace; width: 7.5rem; }
+    .be-label { width: 4.5rem; font-weight: 700; text-transform: none; }
+    .be-num { width: 4rem; text-align: center; }
+    .be-var { width: 12rem; }
+    .be-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 0.3rem; }
+    .be-x { background: none; border: 1px solid #2d3148; border-radius: 4px; color: #a0aec0; cursor: pointer; padding: 0 0.35rem; margin-left: 0.15rem; }
+    .be-x:disabled { opacity: 0.3; cursor: default; }
+    .be-row-actions { text-align: right; }
+    .be-radio { display: block; font-size: 0.82rem; color: #cbd5e0; margin: 0.3rem 0; }
+    .be-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.5rem; }
+    .be-card { text-align: left; background: #0f1117; border: 1px solid #2d3148; border-radius: 8px; padding: 0.65rem; color: #e2e8f0; cursor: pointer; }
+    .be-card[aria-checked=true] { border-color: #4a6fa5; box-shadow: 0 0 0 1px #4a6fa5 inset; }
+    .be-card b { display: block; font-size: 0.82rem; margin-bottom: 0.2rem; }
+    .be-card .hint { margin: 0; }
+    .be-why { padding-left: 1.1rem; margin-top: 0.3rem; }
+    .be-link { background: none; border: 0; color: #63b3ed; cursor: pointer; font-size: 0.76rem; padding: 0; }
+    .be-finding { font-size: 0.82rem; }
+    .be-side { border-left: 1px solid #2d3148; padding-left: 1rem; }
+    @media (max-width: 900px) { .be-side { border-left: 0; padding-left: 0; border-top: 1px solid #2d3148; padding-top: 0.6rem; } }
+    .be-side .field-label { margin-top: 0; }
+    .be-draw { margin-bottom: 0.8rem; font-size: 0.8rem; }
+    .be-chips { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.3rem; }
+    .be-chip { font-family: monospace; font-size: 0.7rem; padding: 0.05rem 0.35rem; border: 1px solid #2d3148; border-radius: 4px; color: #cbd5e0; }
 
     .modal-overlay {
       display: none; position: fixed; inset: 0;
@@ -345,7 +396,8 @@
     {% for bank in banks %}
     {% set st = bank.status %}
     <div class="pool-card">
-      <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/save"
+      <form method="post" action="/admin/surveys/{{ slug }}/randomization/bank/{{ bank.id }}/save" class="bank-form"
+            data-bank-id="{{ bank.id }}" data-draws="{{ bank.n_draws }}"
             onsubmit="return confirm('Save this bank and reset its draws?{% if n_responses %} The survey already holds {{ n_responses }} response(s): the balance starts again from zero.{% endif %}')">
         {% if bank_error and error_bank_id == bank.id %}
         <div class="pool-error">{{ bank_error }}</div>
@@ -357,6 +409,8 @@
           <input type="text" name="bank_name" value="{{ bank.cfg.name }}" placeholder="Bank name">
         </div>
 
+        {# The fields the visual editor writes into; it hides them and shows them back under "Edit as JSON". #}
+        <div class="bank-json">
         <div class="count-row">
           <label>Show</label>
           <input type="number" name="show_count" min="1" max="50" value="{{ bank.typed_show_count or bank.cfg.show_count }}"
@@ -400,6 +454,7 @@
         <p class="hint">Saving resets this bank's draws.</p>
         <div class="pool-actions">
           <button type="submit" class="btn-primary">Save bank</button>
+        </div>
         </div>
       </form>
 
@@ -466,6 +521,9 @@
     <div class="modal">
       <button class="modal-close" onclick="document.getElementById('bank-help').classList.remove('open')">✕</button>
       <h3>How item banks work</h3>
+
+      <h4>The editor</h4>
+      <p>Each bank opens in a visual editor; <strong>Edit as JSON</strong> shows the same configuration as text, which the editor reads back when you return. Findings come from the server while you edit, and the panel on the right shows an example draw per group.</p>
 
       <h4>Items and versions</h4>
       <p>An item is a unit of content; a version is one rendering of it, and <strong>each version is a page of the schema</strong>. Each version keeps its own question names, so an answer always lands in a column that says which item and which version it belongs to.</p>
@@ -582,5 +640,27 @@
       update();
     });
   </script>
+  {% if banks %}
+  <script src="/static/bank-editor.js"></script>
+  <script>
+    // the visual editor over each bank's JSON fields; without script the fields stay as they are
+    (function() {
+      var model = {{ (editor_model or {"pages": [], "questions": [], "calculated": []}) | tojson }};
+      document.querySelectorAll('.bank-form').forEach(function(form) {
+        var bankId = parseInt(form.dataset.bankId, 10);
+        try {
+          BankEditor.mount(form.closest('.pool-card'), {
+            bankId: bankId, slug: {{ slug | tojson }}, model: model,
+            regex: {{ (default_item_regex or "") | tojson }},
+            nResponses: {{ n_responses or 0 }}, nDraws: parseInt(form.dataset.draws, 10) || 0
+          });
+        } catch (e) {
+          // a config the editor cannot read stays editable as JSON
+          console.error('bank editor', bankId, e);
+        }
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

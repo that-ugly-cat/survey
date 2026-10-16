@@ -1920,6 +1920,9 @@ def _randomization_context(db, survey, slug: str) -> dict:
         })
     n_responses = db.execute("SELECT COUNT(*) FROM responses WHERE survey_id = ?",
                              (survey["id"],)).fetchone()[0]
+    for bank in banks_data:
+        bank["n_draws"] = db.execute("SELECT COUNT(*) FROM bank_draws WHERE bank_id = ?",
+                                     (bank["id"],)).fetchone()[0]
     return {
         "slug": slug,
         "title": survey["title"],
@@ -1928,7 +1931,31 @@ def _randomization_context(db, survey, slug: str) -> dict:
         "banks": banks_data,
         "n_responses": n_responses,
         "default_item_regex": banks.DEFAULT_ITEM_REGEX,
+        "editor_model": _bank_editor_model(schema, pools_flow, bank_rows),
     }
+
+
+def _bank_editor_model(schema: dict, pools: list, bank_rows: list) -> dict:
+    """What the visual bank editor needs to know about the questionnaire: every page
+    with the pool or bank that holds it, the questions with the page that asks them,
+    and the calculated values with whether they are saved with the answers. Read-only;
+    the editor sends its config back through the same save as the JSON fields."""
+    owner = {}
+    for pool in pools:
+        for name in pool.get("pool_pages") or []:
+            owner[name] = {"kind": "pool", "name": pool.get("pool_name") or "pool"}
+    for bank_id, cfg in bank_rows:
+        for name in banks.bank_pages(cfg):
+            owner[name] = {"kind": "bank", "name": cfg["name"], "id": bank_id}
+    pages, questions = [], []
+    for index, page in enumerate(schema.get("pages", [])):
+        name = page.get("name") or ""
+        pages.append({"name": name, "title": page.get("title") or "", "owner": owner.get(name)})
+        for q in flow.questions_of(page):
+            questions.append({"name": q.get("name"), "title": q.get("title") or "",
+                              "page": index, "type": q.get("type")})
+    calculated = [{"name": n, "saved": saved} for n, saved in flow.calculated_values(schema).items()]
+    return {"pages": pages, "questions": questions, "calculated": calculated}
 
 
 @app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
@@ -2225,6 +2252,37 @@ async def save_bank(slug: str, bank_id: int, request: Request):
     store_bank(db, survey["id"], bank_id, cfg)
     db.close()
     return RedirectResponse(f"/admin/surveys/{slug}/randomization", status_code=302)
+
+
+@app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/check")
+async def check_bank(slug: str, bank_id: int, request: Request):
+    """A config in, the save checks and an example draw out; nothing is stored. The
+    visual editor calls it as the author edits, so the findings shown are the server's
+    own, the same that a save would give."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not_signed_in"}, status_code=401)
+    survey = _bank_belongs(db, slug, bank_id, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    try:
+        body = await request.json()
+        cfg = banks.normalise(body if isinstance(body, dict) else {})
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as exc:
+        db.close()
+        return JSONResponse({"error": "unreadable_config", "detail": str(exc)}, status_code=400)
+    errors, warnings = bank_save_errors(db, survey, bank_id, cfg)
+    db.close()
+    example = []
+    if not errors:
+        try:
+            example = banks.example_draw(cfg)
+        except Exception:  # a config the checks let through but the allocator cannot draw
+            logging.getLogger("survey").exception("example draw failed for bank %s", bank_id)
+    return JSONResponse({"errors": errors, "warnings": warnings, "example": example})
 
 
 @app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/reset")

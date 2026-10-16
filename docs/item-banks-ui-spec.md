@@ -1,7 +1,14 @@
 # Item banks — a visual editor
 
-*16 October 2026. Status: design, not implemented. Mockup: `docs/mockups/item-banks-ui.html` (open it
-in a browser; it is static, with just enough script to switch tabs and check sums).*
+*16 October 2026. Status: **phase 1 implemented** (`static/bank-editor.js`, the check route in `main.py`,
+`test_bank_editor.js` under Node and `test_bank_check.py`); phases 2–4 designed. Mockup:
+`docs/mockups/item-banks-ui.html` (static, with just enough script to switch tabs and check sums).*
+
+**Phase 1 departs from the design in two places, both simpler.** The editor writes into the form fields
+the JSON view already had, so saving is the existing form post and its checks, unchanged; there is no
+JSON save route. And the model the editor needs (pages with their owner, questions with their page,
+calculated values) travels in the page, not through a `GET .../model` route. The check route is as
+designed.
 
 ## 1. The problem
 
