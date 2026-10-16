@@ -121,6 +121,27 @@ app.mount("/mcp", mcp.streamable_http_app(
         allowed_origins=[os.environ.get("PUBLIC_URL", "http://localhost:8000")])))
 
 
+# Paths whose files are public by design and may be cached anywhere.
+PUBLIC_ASSET_PREFIXES = ("/static/", "/uploads/")
+
+
+@app.middleware("http")
+async def private_by_default(request: Request, call_next):
+    """
+    Nothing but the public assets may be kept by a cache.
+
+    Cloudflare caches by file extension, not by who asked: an export at
+    /admin/surveys/{slug}/export.xlsx, served once to its owner, was then served
+    from the edge to anyone, without a login, for four hours (16 Oct 2026). The
+    same goes for a respondent's results behind their token. So every response
+    outside the public assets says private, no-store, whatever its extension.
+    """
+    response = await call_next(request)
+    if not request.url.path.startswith(PUBLIC_ASSET_PREFIXES):
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
 @app.middleware("http")
 async def mcp_key_gate(request: Request, call_next):
     """

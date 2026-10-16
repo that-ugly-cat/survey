@@ -134,6 +134,12 @@ deploy. `bank-editor.js` is linked with a hash of its content (`?v=`), so a new 
 reaches browsers at once; the vendored libraries (SurveyJS, Chart.js) carry no version, so
 upgrading one needs a new filename or a cache purge.
 
+Everything else is sent with `Cache-Control: private, no-store` (`private_by_default` in
+`main.py`), because Cloudflare caches by file extension and not by who asked: on 16 Oct 2026 an
+owner's `export.xlsx` was served from the edge to anyone, without a login, for four hours. Keep a
+Cloudflare cache rule that bypasses the cache for everything outside `/static/*` and `/uploads/*`
+as well, so a single missing header is not enough to leak again. `test_cache_headers.py` checks it.
+
 `data/` (SQLite + uploads) and `.env` are gitignored — `git pull` never touches them.
 
 Then confirm the container came up and the data survived:
