@@ -800,16 +800,37 @@ async def root(request: Request, error: int = 0, reg_error: str = "", tab: str =
     })
 
 
-def _panel_stop(request, heading: str, message: str, redirect: str | None, status: int = 200):
+def _respondent_locale(request: Request, schema: dict = None) -> str:
+    """The language of a page a respondent meets outside the questionnaire.
+
+    With a survey in hand, one of the languages it speaks, the reader's if it
+    is among them; without one, the reader's browser, so a page that must not
+    hint whether a survey exists does not hint it through its language."""
+    if schema is not None:
+        spoken = report_model.locales(schema)
+        return _pick_locale(request, spoken, default=spoken[0])
+    return _pick_locale(request, list(review_export.LANGS), default="en")
+
+
+def _closed_page(request, schema: dict = None):
+    locale = _respondent_locale(request, schema)
+    heading, message = notice_text.stop_for("closed", locale)
+    return templates.TemplateResponse(
+        request, "closed.html",
+        {"lang": locale, "heading": heading, "message": message}, status_code=404)
+
+
+def _panel_stop(request, kind: str, locale: str, redirect: str | None, status: int = 200):
     """Dead-end page for a panel respondent who cannot take the survey.
     Redirects to the provider when a return URL is configured, so the provider
     can classify them instead of recording an abandonment."""
     if redirect:
         return RedirectResponse(redirect, status_code=302)
+    heading, message = notice_text.stop_for(kind, locale)
     return templates.TemplateResponse(
         request,
         "panel_stop.html",
-        {"heading": heading, "message": message},
+        {"lang": locale, "heading": heading, "message": message},
         status_code=status,
     )
 
@@ -821,8 +842,11 @@ async def survey_page(request: Request, slug: str):
         "SELECT * FROM surveys WHERE slug = ? AND active = 1", (slug,)
     ).fetchone()
     if not row:
+        # A closed survey answers in its own language: whoever holds its link
+        # already knows it exists, and reads the questionnaire's language.
+        closed = db.execute("SELECT schema_json FROM surveys WHERE slug = ?", (slug,)).fetchone()
         db.close()
-        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
+        return _closed_page(request, json.loads(closed["schema_json"]) if closed else None)
 
     # --- panel gate ---
     panel = _panel_config(row)
@@ -837,11 +861,8 @@ async def survey_page(request: Request, slug: str):
         if not panel_token and not preview:
             db.close()
             return _panel_stop(
-                request,
-                "Invalid link",
-                "This survey can only be entered through the link supplied by your panel "
-                "provider, which carries the identifier needed to credit your participation. "
-                "Please return to the panel and start again from there.",
+                request, "panel_invalid",
+                _respondent_locale(request, json.loads(row["schema_json"])),
                 _panel_redirect(panel, "screenout", None),
                 status=400,
             )
@@ -851,10 +872,8 @@ async def survey_page(request: Request, slug: str):
         ).fetchone():
             db.close()
             return _panel_stop(
-                request,
-                "Already completed",
-                "Our records show this invitation has already been used to complete the "
-                "survey. Each invitation can be used once.",
+                request, "panel_used",
+                _respondent_locale(request, json.loads(row["schema_json"])),
                 _panel_redirect(panel, "screenout", panel_token),
             )
 
@@ -941,10 +960,14 @@ async def survey_page(request: Request, slug: str):
     url_tags = _read_url_tags(request.query_params, _url_tag_names(row))
     db.close()
 
+    schema = json.loads(row["schema_json"])
     return templates.TemplateResponse(request, "survey.html", {
         "title": row["title"],
         "slug": slug,
-        "schema": json.loads(row["schema_json"]),
+        "schema": schema,
+        # The questionnaire's own language, so the page says the right thing
+        # before its script runs; the script then follows the reader's choice.
+        "page_lang": report_model.locales(schema)[0],
         "assigned_pages": assigned_pages,
         "pool_pages": pool_pages,
         "assignment_ids": assignment_ids,
@@ -1173,7 +1196,7 @@ async def manage_survey(slug: str, request: Request):
     db.close()
 
     schema = json.loads(row["schema_json"])
-    locales = review_export._locales_in(schema) or {"en"}
+    locales = review_export._locales_in(schema) or {review_export.schema_locale(schema)}
     langs = [l for l in review_export.LANGS if l in locales]
     stored_report = report_model.normalise(row["report_json"], schema)
 
@@ -1578,13 +1601,13 @@ async def _public_results(slug: str, request: Request, embed: bool):
     survey = db.execute("SELECT * FROM surveys WHERE slug = ?", (slug,)).fetchone()
     if not survey:
         db.close()
-        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
+        return _closed_page(request)
     viewer, mine = _public_viewer(db, survey, request)
     if viewer is None:
         # A report nobody published and a survey that does not exist answer the
         # same way: there is nothing here to find, and no hint that there might be.
         db.close()
-        return templates.TemplateResponse(request, "closed.html", {}, status_code=404)
+        return _closed_page(request)
     context = _results_context(request, db, survey, slug, viewer, mine=mine, embed=embed)
     db.close()
     return templates.TemplateResponse(request, "results.html", context)

@@ -153,7 +153,7 @@ From there:
 
 ## Checks
 
-Twenty-two self-contained Python scripts and one node script, no test framework and no
+Twenty-three self-contained Python scripts and one node script, no test framework and no
 running server. They build their own
 temporary database, so they never touch real data:
 
@@ -165,7 +165,8 @@ python test_aggregate.py && python test_report.py && python test_results.py
 python test_stats.py && python test_explore.py && python test_banks.py
 python test_arm_from.py && python test_bank_check.py && python test_rotation.py
 python test_pagegen.py && python test_balance.py && python test_notice.py
-python test_url_tags.py && python test_review_fixes.py && node test_bank_editor.js
+python test_url_tags.py && python test_review_fixes.py && python test_locale.py
+node test_bank_editor.js
 ```
 
 `test_banks.py` covers item banks: allocation balance simulated over 300 participants, quotas, tie-breaking, six simultaneous arrivals, the pending window, validation, the round trip through the page load and the submit (including a forged `_banks` being discarded), the long export, the admin and MCP surfaces, and the guard on pools whose combinations would block the server. `test_flow.py` covers expression evaluation, arm preview and schema validation — no database
@@ -200,16 +201,18 @@ notice to its factual claims (no cookies, no browser storage, nothing from a thi
 `test_url_tags.py` covers link tags and the response id in the exports, and
 `test_review_fixes.py` the defects a documentation review found in October 2026 (purge and bank
 draws, a respondent's token on the poll, the MCP validating with banks, the typed bank name, panels
-in the report editor) plus the duplicate action.
+in the report editor) plus the duplicate action. `test_locale.py` covers the language a
+respondent is spoken to in: the schema's declared `locale` for plain strings, run in node from the
+template, and the dead-end pages in four languages.
 
 To run them against a built image without disturbing the running container:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags review_fixes; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags review_fixes locale; do python test_$t.py || exit 1; done"
 ```
 
-`test_page_order.py` needs `node` on the path for its last section; without it that one
+`test_page_order.py` and `test_locale.py` need `node` on the path for one section each; without it that one
 section fails while everything else passes. `test_bank_editor.js` runs under node only, so it
 stays outside the container loop.
 

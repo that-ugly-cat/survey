@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ page_lang or 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -253,7 +253,20 @@
     // Scan schema recursively for locale keys inside localized string objects.
     // A localized string object has all-string values and at least one key that
     // is a known locale code or "default".
+    //
+    // The texts written without a language — plain strings, and "default" keys —
+    // are in the schema's own language. SurveyJS takes that from the schema's
+    // `locale` and falls back to English only when there is none; so must this,
+    // or an Italian questionnaire written in plain strings found no language,
+    // fell back to English and overrode its own locale: buttons, required-answer
+    // messages and the page's lang came out in English under Italian questions.
+    function schemaLocale(schema) {
+      var declared = String((schema && schema.locale) || "").toLowerCase();
+      return LANGS.indexOf(declared) !== -1 ? declared : "en";
+    }
+
     function getAvailableLocales(obj) {
+      var own = schemaLocale(obj);
       var found = {};
       function isLocaleObj(o) {
         if (!o || typeof o !== "object" || Array.isArray(o)) return false;
@@ -268,14 +281,15 @@
         if (isLocaleObj(val)) {
           Object.keys(val).forEach(function(k) {
             if (LANGS.indexOf(k) !== -1) found[k] = true;
-            if (k === "default")         found["en"] = true; // default maps to EN
+            if (k === "default")         found[own] = true;
           });
         } else {
           Object.keys(val).forEach(function(k) { walk(val[k]); });
         }
       }
       walk(obj);
-      return LANGS.filter(function(l) { return found[l]; });
+      var spoken = LANGS.filter(function(l) { return found[l]; });
+      return spoken.length ? spoken : [own];
     }
 
     function browserLang() {

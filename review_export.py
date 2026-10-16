@@ -51,6 +51,16 @@ def loc_text(v) -> str:
     return "" if v is None else str(v)
 
 
+def schema_locale(schema) -> str:
+    """The language of the texts a schema writes without one: plain strings and
+    `default` keys. SurveyJS takes it from the schema's `locale` and assumes
+    English only when there is none, and so does every scan here; counting them
+    as English always made an Italian questionnaire in plain strings read as
+    English on the manage page and in this document."""
+    declared = str((schema or {}).get("locale") or "").strip().lower() if isinstance(schema, dict) else ""
+    return declared if declared in LANGS else "en"
+
+
 def locales_in(obj) -> set:
     """Public name for the locale scan, so other modules do not have to reach
     for a private one. The report editor asks this to know which languages a
@@ -58,8 +68,10 @@ def locales_in(obj) -> set:
     return _locales_in(obj)
 
 
-def _locales_in(obj) -> set:
-    """Every locale key used anywhere inside `obj` ('default' counts as 'en')."""
+def _locales_in(obj, own: str = None) -> set:
+    """Every locale key used anywhere inside `obj`; 'default' counts as the
+    schema's own language (`schema_locale`)."""
+    own = own or schema_locale(obj)
     found = set()
 
     def walk(v):
@@ -72,7 +84,7 @@ def _locales_in(obj) -> set:
                     if k in LANGS:
                         found.add(k)
                     elif k == "default":
-                        found.add("en")
+                        found.add(own)
             else:
                 for x in v.values():
                     walk(x)
@@ -343,7 +355,7 @@ def _image_choice_lines(doc, choices):
         run.font.size = Pt(9)
 
 
-def _locale_counts(el):
+def _locale_counts(el, own: str = "en"):
     """(counts, total): how many of the element's localized strings carry each
     locale, and how many localized strings there are in total."""
     counts = {}
@@ -358,7 +370,7 @@ def _locale_counts(el):
             if _is_loc_obj(v):
                 total += 1
                 for k in v:
-                    loc = "en" if k == "default" else k
+                    loc = own if k == "default" else k
                     if loc in LANGS:
                         counts[loc] = counts.get(loc, 0) + 1
             else:
@@ -369,13 +381,13 @@ def _locale_counts(el):
     return counts, total
 
 
-def _translation_flag(el, survey_locales) -> str | None:
+def _translation_flag(el, survey_locales, own: str = "en") -> str | None:
     """Per-element translation status vs. the locales used anywhere in the schema."""
     if len(survey_locales) <= 1:
         return None
-    counts, total = _locale_counts(el)
+    counts, total = _locale_counts(el, own)
     if total == 0:  # plain strings only: primary language, nothing translated
-        others = ", ".join(l.upper() for l in sorted(survey_locales - {"en"}))
+        others = ", ".join(l.upper() for l in sorted(survey_locales - {own}))
         return f"Translations: none (primary language only) — MISSING: {others}"
     parts = []
     for loc in sorted(counts):
@@ -388,7 +400,7 @@ def _translation_flag(el, survey_locales) -> str | None:
     return label
 
 
-def _render_question(doc, el, survey_locales):
+def _render_question(doc, el, survey_locales, own: str = "en"):
     title = loc_text(el.get("title", el.get("name", "")))
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(10)
@@ -412,7 +424,7 @@ def _render_question(doc, el, survey_locales):
         _note(doc, "Required only if: " + humanize_expr(el["requiredIf"]))
     if el.get("enableIf"):
         _note(doc, "Enabled only if: " + humanize_expr(el["enableIf"]))
-    flag = _translation_flag(el, survey_locales)
+    flag = _translation_flag(el, survey_locales, own)
     if flag:
         _note(doc, flag)
 
@@ -475,10 +487,10 @@ def _render_question(doc, el, survey_locales):
         _note(doc, f"Question type '{kind}' not rendered here — check the JSON schema.")
 
 
-def _render_element(doc, el, survey_locales):
+def _render_element(doc, el, survey_locales, own: str = "en"):
     kind = el.get("type")
     if kind == "html":
-        flag = _translation_flag(el, survey_locales)
+        flag = _translation_flag(el, survey_locales, own)
         if flag:
             _note(doc, flag)
         _render_html_element(doc, loc_text(el.get("html", "")))
@@ -490,9 +502,9 @@ def _render_element(doc, el, survey_locales):
         if el.get("visibleIf"):
             _note(doc, "Panel shown only if: " + humanize_expr(el["visibleIf"]))
         for sub in el.get("elements", el.get("templateElements", [])):
-            _render_element(doc, sub, survey_locales)
+            _render_element(doc, sub, survey_locales, own)
     else:
-        _render_question(doc, el, survey_locales)
+        _render_question(doc, el, survey_locales, own)
 
 
 # --- randomization notes ---
@@ -538,7 +550,8 @@ def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> byte
     normal.font.name = "Calibri"
     normal.font.size = Pt(11)
 
-    survey_locales = _locales_in(schema) or {"en"}
+    own = schema_locale(schema)
+    survey_locales = _locales_in(schema) or {own}
     pages = schema.get("pages", [])
     n_questions = sum(
         1 for p in pages for e in p.get("elements", []) if e.get("type") != "html"
@@ -625,7 +638,7 @@ def build_review_docx(schema: dict, pools: list, survey_title: str = "") -> byte
             run = p.add_run(loc_text(page["description"]))
             run.italic = True
         for el in page.get("elements", []):
-            _render_element(doc, el, survey_locales)
+            _render_element(doc, el, survey_locales, own)
 
     import io
     buf = io.BytesIO()

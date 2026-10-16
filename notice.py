@@ -319,3 +319,59 @@ NOTICE = {
 def notice_for(locale: str = "en") -> dict:
     """The notice in one language, falling back to English."""
     return NOTICE.get(locale, NOTICE["en"])
+
+
+# The dead ends a respondent can meet before the questionnaire: a closed or
+# unknown survey, and the two panel refusals. They are read by the same people
+# as the questionnaire, so they speak its four languages; an Italian participant
+# turned away in English is told twice that the page was not meant for them.
+STOPS = {
+    "closed": {
+        "en": ("Survey not available",
+               "This survey is closed or the link is no longer valid."),
+        "de": ("Umfrage nicht verfügbar",
+               "Diese Umfrage ist geschlossen oder der Link ist nicht mehr gültig."),
+        "fr": ("Questionnaire indisponible",
+               "Ce questionnaire est fermé ou le lien n'est plus valide."),
+        "it": ("Questionario non disponibile",
+               "Questo questionario è chiuso o il link non è più valido."),
+    },
+    "panel_invalid": {
+        "en": ("Invalid link",
+               "This survey can only be entered through the link supplied by your panel "
+               "provider, which carries the identifier needed to credit your participation. "
+               "Please return to the panel and start again from there."),
+        "de": ("Ungültiger Link",
+               "Diese Umfrage ist nur über den Link Ihres Panel-Anbieters zugänglich, der die "
+               "Kennung enthält, mit der Ihre Teilnahme gutgeschrieben wird. Bitte kehren Sie "
+               "zum Panel zurück und beginnen Sie dort neu."),
+        "fr": ("Lien non valide",
+               "Ce questionnaire n'est accessible que par le lien fourni par votre panel, qui "
+               "contient l'identifiant nécessaire pour créditer votre participation. Veuillez "
+               "retourner sur le panel et recommencer à partir de là."),
+        "it": ("Link non valido",
+               "A questo questionario si accede solo dal link fornito dal tuo panel, che "
+               "contiene l'identificativo necessario per accreditare la tua partecipazione. "
+               "Torna al panel e ricomincia da lì."),
+    },
+    "panel_used": {
+        "en": ("Already completed",
+               "Our records show this invitation has already been used to complete the "
+               "survey. Each invitation can be used once."),
+        "de": ("Bereits ausgefüllt",
+               "Laut unseren Unterlagen wurde diese Einladung bereits zum Ausfüllen der "
+               "Umfrage verwendet. Jede Einladung kann nur einmal verwendet werden."),
+        "fr": ("Déjà complété",
+               "Selon nos données, cette invitation a déjà servi à remplir le questionnaire. "
+               "Chaque invitation ne peut être utilisée qu'une fois."),
+        "it": ("Già compilato",
+               "Risulta che questo invito è già stato usato per compilare il questionario. "
+               "Ogni invito si può usare una sola volta."),
+    },
+}
+
+
+def stop_for(kind: str, locale: str = "en") -> tuple:
+    """(heading, message) of one dead end, falling back to English."""
+    texts = STOPS[kind]
+    return texts.get(locale, texts["en"])

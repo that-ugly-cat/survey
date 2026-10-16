@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang or 'en' }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Survey not available</title>
+  <title>{{ heading or 'Survey not available' }}</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -21,8 +21,8 @@
 </head>
 <body>
   <div class="card">
-    <h2>Survey not available</h2>
-    <p>This survey is closed or the link is no longer valid.</p>
+    <h2>{{ heading or 'Survey not available' }}</h2>
+    <p>{{ message or 'This survey is closed or the link is no longer valid.' }}</p>
   </div>
 </body>
 </html>

@@ -89,10 +89,10 @@ never touched:
 
 ```bash
 docker compose run --rm --no-deps --entrypoint sh survey \
-  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags review_fixes; do python test_$t.py || exit 1; done"
+  -c "pip install --quiet httpx && cd /app && for t in flow mcp page_order panel panel_migration purge edit_guard review aggregate report results stats explore banks arm_from bank_check rotation pagegen balance notice url_tags review_fixes locale; do python test_$t.py || exit 1; done"
 ```
 
-`test_page_order.py` needs `node` for its last section; in a container without it that one
+`test_page_order.py` and `test_locale.py` need `node` for one section each; in a container without it that one
 section fails while everything else passes. `test_bank_editor.js` needs node too, and runs
 outside the container (`node test_bank_editor.js`).
 
