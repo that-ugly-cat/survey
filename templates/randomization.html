@@ -184,6 +184,11 @@
     .be-card b { display: block; font-size: 0.82rem; margin-bottom: 0.2rem; }
     .be-card .hint { margin: 0; }
     .be-why { padding-left: 1.1rem; margin-top: 0.3rem; }
+    .be-rot { margin-top: 0.8rem; }
+    .be-rot .be-grid { max-width: 560px; }
+    .be-note { border: 1px solid #2d3148; border-left: 3px solid #4a6fa5; border-radius: 6px; padding: 0.55rem 0.75rem;
+               color: #a0aec0; font-size: 0.8rem; margin-top: 0.7rem; line-height: 1.6; }
+    .be-note code { font-family: monospace; font-size: 0.74rem; color: #63b3ed; word-break: break-all; }
     .be-link { background: none; border: 0; color: #63b3ed; cursor: pointer; font-size: 0.76rem; padding: 0; }
     .be-finding { font-size: 0.82rem; }
     .be-side { border-left: 1px solid #2d3148; padding-left: 1rem; }
@@ -523,7 +528,7 @@
       <h3>How item banks work</h3>
 
       <h4>The editor</h4>
-      <p>Each bank opens in a visual editor; <strong>Edit as JSON</strong> shows the same configuration as text, which the editor reads back when you return. Findings come from the server while you edit, and the panel on the right shows an example draw per group.</p>
+      <p>Each bank opens in a visual editor; <strong>Edit as JSON</strong> shows the same configuration as text, which the editor reads back when you return. Findings come from the server while you edit, and the panel on the right shows an example draw per group. Under <strong>Groups</strong>, <em>Rotation across waves</em> adds to the questionnaire the calculated value that gives each participant the next group at each wave.</p>
 
       <h4>Items and versions</h4>
       <p>An item is a unit of content; a version is one rendering of it, and <strong>each version is a page of the schema</strong>. Each version keeps its own question names, so an answer always lands in a column that says which item and which version it belongs to.</p>

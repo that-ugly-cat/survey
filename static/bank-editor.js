@@ -73,7 +73,7 @@
       items: items,
       show_count: st.show_count,
       arm_var: st.arm_var || null,
-      arm_from: (st.assign === "answer" && st.arm_from) ? st.arm_from : null,
+      arm_from: ((st.assign === "answer" || st.assign === "rotation") && st.arm_from) ? st.arm_from : null,
       arms: arms,
       order: st.order,
     };
@@ -120,8 +120,50 @@
     return { items: multi, leftOut: unmatched.concat(lone) };
   }
 
+  // Rotation across waves: the same expression rotation.py builds and recognises, so the
+  // preview shows exactly what the server will write.
+  function buildExpression(question, wave, arms) {
+    var k = arms.length, r = "({" + question + "} + " + (parseInt(wave, 10) || 0) + ") % " + k;
+    if (k === 1) return "'" + arms[0] + "'";
+    var expr = "'" + arms[k - 1] + "'";
+    for (var i = k - 2; i >= 0; i--) expr = "iif(" + r + " = " + i + ", '" + arms[i] + "', " + expr + ")";
+    return expr;
+  }
+
+  function parseExpression(expr) {
+    var m = /^iif\(\(\{([A-Za-z_][A-Za-z0-9_]*)\} \+ (\d+)\) % (\d+) = 0, /.exec(expr || "");
+    if (!m) return null;
+    var arms = (expr.match(/'([^']*)'/g) || []).map(function (s) { return s.slice(1, -1); });
+    if (arms.length !== parseInt(m[3], 10)) return null;
+    var parsed = { question: m[1], wave: parseInt(m[2], 10), arms: arms };
+    return buildExpression(parsed.question, parsed.wave, arms) === expr ? parsed : null;
+  }
+
+  // Expected share per arm: a day of the month weighted by the calendar, any other
+  // bounded integer as uniform, null when the range is unknown.
+  function expectedShares(meta, wave, arms) {
+    var lo = parseInt(meta && meta.min, 10), hi = parseInt(meta && meta.max, 10);
+    if (isNaN(lo) || isNaN(hi) || hi < lo || hi - lo > 10000) return null;
+    var weights = {}, v;
+    if (lo === 1 && hi === 31) {
+      for (v = 1; v <= 28; v++) weights[v] = 12;
+      weights[29] = 11.25; weights[30] = 11; weights[31] = 7;
+    } else {
+      for (v = lo; v <= hi; v++) weights[v] = 1;
+    }
+    var total = 0, shares = {}, k = arms.length;
+    arms.forEach(function (a) { shares[a] = 0; });
+    Object.keys(weights).forEach(function (key) {
+      var n = parseInt(key, 10); total += weights[key];
+      shares[arms[(n + parseInt(wave, 10)) % k]] += weights[key];
+    });
+    arms.forEach(function (a) { shares[a] = Math.round(1000 * shares[a] / total) / 10; });
+    return shares;
+  }
+
   var api = { stateFromConfig: stateFromConfig, configFromState: configFromState,
-              answerCandidates: answerCandidates, fillFromNames: fillFromNames, labelsOf: labelsOf };
+              answerCandidates: answerCandidates, fillFromNames: fillFromNames, labelsOf: labelsOf,
+              buildExpression: buildExpression, parseExpression: parseExpression, expectedShares: expectedShares };
   if (typeof module !== "undefined" && module.exports) { module.exports = api; return; }
 
   // --- the editor in the page ----------------------------------------------------
@@ -154,11 +196,25 @@
       arms: this.form.querySelector('[name="arms_json"]'),
     };
     this.st = stateFromConfig(this.readFields());
+    this.detectRotation();
     this.tab = "content";
     this.filter = "";
     this.findings = { errors: [], warnings: [], example: [] };
     this.build();
   }
+
+  // A bank whose arm comes from a rotation value the platform wrote, over these same
+  // groups in this order, opens in the rotation helper rather than as a bare answer.
+  Editor.prototype.detectRotation = function () {
+    var st = this.st;
+    if (!st.arm_from) return;
+    var calc = this.opts.model.calculated.filter(function (c) { return c.name === st.arm_from && c.rotation; })[0];
+    var names = st.arms.map(function (a) { return a.name; });
+    if (calc && JSON.stringify(calc.rotation.arms) === JSON.stringify(names)) {
+      st.assign = "rotation";
+      st.rot = { question: calc.rotation.question, wave: calc.rotation.wave, name: calc.name };
+    }
+  };
 
   Editor.prototype.readFields = function () {
     var f = this.fields;
@@ -243,6 +299,7 @@
     }
     try {
       this.st = stateFromConfig(this.readFields());
+      this.detectRotation();
     } catch (e) {
       this.jsonNote.textContent = "The JSON does not parse (" + e.message + "): fix it to go back to the editor.";
       return;
@@ -488,11 +545,17 @@
     p.appendChild(el("div", { class: "field-label", text: "How a participant gets a group" }));
     var cards = el("div", { class: "be-cards", role: "radiogroup" });
     [["balanced", "Balanced by the platform", "The least-used group goes to the next participant."],
-     ["answer", "From an answer", "A question or calculated value names the group. Sizes follow the answers."]].forEach(function (c) {
+     ["answer", "From an answer", "A question or calculated value names the group. Sizes follow the answers."],
+     ["rotation", "Rotation across waves", "Each participant gets the next group at each wave, from an answer every wave shares."]].forEach(function (c) {
       cards.appendChild(el("button", { type: "button", role: "radio", class: "be-card", "aria-checked": String(st.assign === c[0]),
-        onclick: function () { st.assign = c[0]; self.render(); self.sync(); } }, [el("b", { text: c[1] }), el("span", { class: "hint", text: c[2] })]));
+        onclick: function () {
+          st.assign = c[0];
+          if (c[0] === "rotation" && st.rot) st.arm_from = st.rot.name;
+          self.render(); self.sync();
+        } }, [el("b", { text: c[1] }), el("span", { class: "hint", text: c[2] })]));
     });
     p.appendChild(cards);
+    if (st.assign === "rotation") { this.rotationPanel(p); return; }
     if (st.assign !== "answer") return;
     var cand = answerCandidates(this.opts.model, this.bankPages());
     var sel = el("select", { class: "bank-select", "aria-label": "Answer that names the group",
@@ -508,6 +571,111 @@
       p.appendChild(el("details", { class: "be-adv" }, [el("summary", { class: "hint", text: cand.no.length + " not available, and why" }),
         el("ul", { class: "be-why" }, cand.no.map(function (c) { return el("li", { class: "hint", text: c.name + ": " + c.reason }); }))]));
     }
+  };
+
+  // --- rotation across waves (phase 2) ---------------------------------------------
+
+  Editor.prototype.rotationPanel = function (p) {
+    var self = this, st = this.st, model = this.opts.model;
+    var arms = st.arms.map(function (a) { return a.name; });
+    var cand = answerCandidates(model, this.bankPages()).ok.filter(function (c) {
+      return model.questions.some(function (q) { return q.name === c.name; });
+    });
+    if (!st.rot) {
+      var numeric = cand.filter(function (c) {
+        var q = model.questions.filter(function (x) { return x.name === c.name; })[0];
+        return q && q.inputType === "number";
+      })[0] || cand[0];
+      st.rot = { question: numeric ? numeric.name : "", wave: 1, name: st.arm_from || "form" };
+    }
+    var rot = st.rot;
+    st.arm_from = rot.name;
+
+    var box = el("div", { class: "be-rot" });
+    p.appendChild(box);
+    function paint() {
+      box.textContent = "";
+      var qSel = el("select", { class: "bank-select", "aria-label": "Answer every wave shares",
+        onchange: function (e) { rot.question = e.target.value; paint(); } });
+      if (!cand.length) qSel.appendChild(el("option", { value: "", text: "no question before the bank" }));
+      cand.forEach(function (c) { qSel.appendChild(el("option", { value: c.name, text: c.label, selected: c.name === rot.question ? "selected" : null })); });
+      var wave = el("input", { type: "number", min: "1", class: "be-num", value: rot.wave, "aria-label": "Wave of this questionnaire",
+        onchange: function (e) { rot.wave = Math.max(1, parseInt(e.target.value, 10) || 1); paint(); } });
+      var name = el("input", { type: "text", class: "be-var", value: rot.name, "aria-label": "Name of the calculated value",
+        onchange: function (e) { var v = e.target.value.trim(); if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(v)) { rot.name = v; st.arm_from = v; self.sync(); } paint(); } });
+      box.appendChild(el("div", { class: "field-label", text: "Answer that every wave asks, given the same way each time" }));
+      box.appendChild(qSel);
+      box.appendChild(el("div", { class: "count-row" }, [
+        el("label", { class: "hint", text: "This questionnaire is wave " }), wave,
+        el("label", { class: "hint", text: " · calculated value " }), name,
+        el("span", { class: "hint", text: " · " + arms.length + " groups: " + arms.join(", ") })]));
+      if (arms.length < 2) { box.appendChild(el("p", { class: "pool-error", text: "A rotation needs at least two groups." })); return; }
+      if (!rot.question) { box.appendChild(el("p", { class: "pool-error", text: "Choose the answer the rotation reads." })); return; }
+
+      // the rotation table: who gets which group at each wave
+      var waves = Math.max(arms.length, rot.wave);
+      var meta = model.questions.filter(function (q) { return q.name === rot.question; })[0] || {};
+      var shares = expectedShares(meta, rot.wave, arms);
+      var head = el("tr", {}, [el("th", { text: "Group at wave 1" })]);
+      for (var w = 2; w <= waves; w++) head.appendChild(el("th", { text: "Wave " + w }));
+      head.appendChild(el("th", { text: "Share at wave " + rot.wave }));
+      var body = el("tbody");
+      // a participant whose answer gives index i at wave 1 has index i + (w - 1) at wave w
+      arms.forEach(function (a, i) {
+        var row = el("tr", {}, [el("td", { class: "cond-key", text: a })]);
+        for (var w2 = 2; w2 <= waves; w2++) row.appendChild(el("td", { class: "cond-key", text: arms[(i + w2 - 1) % arms.length] }));
+        var current = arms[(i + rot.wave - 1) % arms.length];
+        row.appendChild(el("td", { class: "pct", text: shares ? current + ": " + shares[current] + "%" : "—" }));
+        body.appendChild(row);
+      });
+      box.appendChild(el("div", { class: "be-grid" }, [el("table", {}, [el("thead", {}, [head]), body])]));
+      box.appendChild(el("p", { class: "hint", text: shares
+        ? (meta.min === 1 && meta.max === 31 ? "Shares weighted by how often each day of the month occurs in a year (the 31st exists in seven months)."
+                                              : "Shares assume every value from " + meta.min + " to " + meta.max + " is equally likely.")
+        : "No estimate: the answer has no declared minimum and maximum." }));
+
+      var expr = buildExpression(rot.question, rot.wave, arms);
+      var existing = model.calculated.filter(function (c) { return c.name === rot.name; })[0];
+      var status, action;
+      if (existing && existing.expression === expr && existing.saved) {
+        status = "In the questionnaire as " + rot.name + "." + (self.justAdded === rot.name ? " Save the bank to use it." : "");
+        action = null;
+      } else {
+        status = existing ? "Will replace the calculated value " + rot.name + " already in the questionnaire."
+                          : "Will add to the questionnaire a calculated value " + rot.name + ", saved with the answers.";
+        action = existing ? "Replace in questionnaire" : "Add to questionnaire";
+      }
+      box.appendChild(el("div", { class: "be-note" }, [status + " ", el("code", { text: expr })]));
+      box.appendChild(el("p", { class: "hint", text: "For the next wave, copy the survey and change only the wave number here." }));
+      if (action) {
+        var note = el("span", { class: "hint" });
+        box.appendChild(el("div", { class: "count-row" }, [el("button", { type: "button", class: "btn-sm btn-secondary", text: action,
+          onclick: function () { self.addRotation(rot, arms, false, note); } }), note]));
+      }
+    }
+    paint();
+  };
+
+  Editor.prototype.addRotation = function (rot, arms, confirmed, note) {
+    var self = this, o = this.opts;
+    note.textContent = "Adding…";
+    fetch("/admin/surveys/" + encodeURIComponent(o.slug) + "/randomization/rotation", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: rot.name, question: rot.question, wave: rot.wave, arms: arms, confirm: confirmed }),
+    }).then(function (r) { return r.json().then(function (d) { return { status: r.status, d: d }; }); }).then(function (res) {
+      if (res.status === 409 && res.d.error === "responses_held") {
+        if (confirm("The survey holds " + res.d.held + " response(s): changing the questionnaire under them changes what the data means. Add the rotation anyway?"))
+          return self.addRotation(rot, arms, true, note);
+        note.textContent = "Not added.";
+        return;
+      }
+      if (!res.d.ok) { note.textContent = (res.d.errors || [res.d.error || "refused"]).join("; "); return; }
+      o.model.calculated = res.d.calculated;
+      self.st.arm_from = rot.name;
+      self.justAdded = rot.name;
+      self.render(); self.sync();
+      self.jsonNote.textContent = "Rotation " + (res.d.replaced ? "updated" : "added") + " in the questionnaire. Save the bank to use it.";
+    }).catch(function () { note.textContent = "The server could not be reached; nothing was added."; });
   };
 
   // --- tab 4: check and save ------------------------------------------------------

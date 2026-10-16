@@ -32,6 +32,7 @@ import notice as notice_text
 import report as report_model
 import results as results_view
 import review_export
+import rotation
 import totp
 
 DB_PATH = os.getenv("DB_PATH", "/data/survey.db")
@@ -1953,9 +1954,21 @@ def _bank_editor_model(schema: dict, pools: list, bank_rows: list) -> dict:
         pages.append({"name": name, "title": page.get("title") or "", "owner": owner.get(name)})
         for q in flow.questions_of(page):
             questions.append({"name": q.get("name"), "title": q.get("title") or "",
-                              "page": index, "type": q.get("type")})
-    calculated = [{"name": n, "saved": saved} for n, saved in flow.calculated_values(schema).items()]
-    return {"pages": pages, "questions": questions, "calculated": calculated}
+                              "page": index, "type": q.get("type"),
+                              "inputType": q.get("inputType"), "min": q.get("min"), "max": q.get("max")})
+    return {"pages": pages, "questions": questions, "calculated": _calculated_for_editor(schema)}
+
+
+def _calculated_for_editor(schema: dict) -> list:
+    """Calculated values as the editor shows them; a rotation the platform wrote is
+    recognised, so the editor can open it in the rotation helper."""
+    out = []
+    for c in schema.get("calculatedValues") or []:
+        if isinstance(c, dict) and c.get("name"):
+            out.append({"name": c["name"], "saved": bool(c.get("includeIntoResult")),
+                        "expression": c.get("expression") or "",
+                        "rotation": rotation.parse_expression(c.get("expression") or "")})
+    return out
 
 
 @app.get("/admin/surveys/{slug}/randomization", response_class=HTMLResponse)
@@ -2283,6 +2296,52 @@ async def check_bank(slug: str, bank_id: int, request: Request):
         except Exception:  # a config the checks let through but the allocator cannot draw
             logging.getLogger("survey").exception("example draw failed for bank %s", bank_id)
     return JSONResponse({"errors": errors, "warnings": warnings, "example": example})
+
+
+@app.post("/admin/surveys/{slug}/randomization/rotation")
+async def add_rotation(slug: str, request: Request):
+    """Add, or replace, the calculated value that rotates parallel forms across waves
+    (rotation.py). The server builds the expression from the parameters; the browser
+    never sends one. Like any change to the questionnaire, it is refused over collected
+    answers unless the request says it knows (`confirm`)."""
+    db = get_db()
+    user = auth.current_user(request, db)
+    if not user:
+        db.close()
+        return JSONResponse({"error": "not_signed_in"}, status_code=401)
+    survey = _owned_survey(db, slug, user)
+    if not survey:
+        db.close()
+        return JSONResponse({"error": "not_found"}, status_code=404)
+    try:
+        params = await request.json()
+        if not isinstance(params, dict):
+            raise ValueError("not an object")
+    except (json.JSONDecodeError, ValueError):
+        db.close()
+        return JSONResponse({"error": "unreadable_request"}, status_code=400)
+    schema = json.loads(survey["schema_json"])
+    errors = rotation.validate(params, schema)
+    if errors:
+        db.close()
+        return JSONResponse({"error": errors[0][0], "errors": [m for _, m in errors]}, status_code=400)
+    held = _response_count(db, survey["id"])
+    if held and not params.get("confirm"):
+        db.close()
+        return JSONResponse({"error": "responses_held", "held": held}, status_code=409)
+    new_schema, expr, replaced = rotation.apply(schema, params)
+    if held:
+        log.warning("rotation value %r written over %d response(s) on %s by user %s",
+                    params["name"], held, slug, user["id"])
+    db.execute("UPDATE surveys SET schema_json = ? WHERE id = ?",
+               (json.dumps(new_schema, ensure_ascii=False), survey["id"]))
+    db.commit()
+    db.close()
+    _invalidate_results(survey["id"])
+    meta = next((q for _, q in flow.all_questions(new_schema) if q.get("name") == params["question"]), {})
+    return JSONResponse({"ok": True, "expression": expr, "replaced": replaced,
+                         "calculated": _calculated_for_editor(new_schema),
+                         "shares": rotation.expected_shares(meta, int(params["wave"]), params["arms"])})
 
 
 @app.post("/admin/surveys/{slug}/randomization/bank/{bank_id}/reset")

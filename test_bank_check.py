@@ -81,8 +81,9 @@ with TestClient(main.app) as client:
     owners = {p["name"]: p["owner"] for p in model["pages"]}
     ok(owners["v1_A"] == {"kind": "bank", "name": "vign", "id": bid} and owners["code"] is None,
        "the model says which bank holds a page, and that a common page is free")
-    ok({"name": "day", "title": "", "page": 0, "type": "text"} in model["questions"], "questions carry the page that asks them")
-    ok({"name": "form", "saved": True} in model["calculated"] and {"name": "tmp", "saved": False} in model["calculated"],
+    has = lambda rows, want: any(want.items() <= r.items() for r in rows)
+    ok(has(model["questions"], {"name": "day", "page": 0, "type": "text"}), "questions carry the page that asks them")
+    ok(has(model["calculated"], {"name": "form", "saved": True}) and has(model["calculated"], {"name": "tmp", "saved": False}),
        "calculated values carry whether they are saved")
     ok(client.get("/static/bank-editor.js").status_code == 200, "the editor script is served")
 

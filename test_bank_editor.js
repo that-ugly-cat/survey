@@ -80,5 +80,20 @@ const filled = api.fillFromNames(["consent", "P001_H", "P001_L", "P002_H", "P002
 ok(filled.items.length === 2 && filled.items[0].versions.L === "P001_L", "families of versions are found with the server's default pattern");
 ok(filled.leftOut.includes("consent") && filled.leftOut.includes("debrief_page"), "single pages are left out and listed");
 
+console.log("\n--- rotation, the same as rotation.py ---");
+// the expected strings and numbers are the ones test_rotation.py checks on the Python side
+const PROMETEO = "iif(({codice_giorno} + 1) % 3 = 0, 'F1', iif(({codice_giorno} + 1) % 3 = 1, 'F2', 'F3'))";
+ok(api.buildExpression("codice_giorno", 1, forms) === PROMETEO, "the expression matches rotation.py and PROMETEO's schema");
+ok(api.buildExpression("d", 2, ["A", "B"]) === "iif(({d} + 2) % 2 = 0, 'A', 'B')", "two groups, as in Python");
+ok(JSON.stringify(api.parseExpression(PROMETEO)) === JSON.stringify({ question: "codice_giorno", wave: 1, arms: forms }), "it is recognised");
+ok(api.parseExpression(PROMETEO + " ") === null && api.parseExpression("{d} % 3") === null, "near misses are not");
+ok(JSON.stringify(api.expectedShares({ min: 1, max: 31 }, 1, forms)) === JSON.stringify({ F1: 32.6, F2: 32.6, F3: 34.8 }),
+   "day-of-month shares, as in Python");
+ok(JSON.stringify(api.expectedShares({ min: 0, max: 5 }, 1, ["A", "B", "C"])) === JSON.stringify({ A: 33.3, B: 33.3, C: 33.3 }),
+   "uniform shares, as in Python");
+ok(api.expectedShares({}, 1, forms) === null, "no range, no estimate");
+const rot = api.stateFromConfig(prometeo); rot.assign = "rotation";
+ok(api.configFromState(rot).arm_from === "forma", "a rotation keeps its arm source in the config");
+
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
 process.exit(failed ? 1 : 0);

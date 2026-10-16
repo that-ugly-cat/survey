@@ -321,7 +321,8 @@ A rotation then lives in the schema. With a day of birth `day` and one survey pe
 }]
 ```
 
-where the constant (here 2) is the wave number. A pool cannot take its condition this way; a form that
+where the constant (here 2) is the wave number. The bank editor writes this value for you
+(*Rotation across waves*, `rotation.py`) and recognises one it wrote. A pool cannot take its condition this way; a form that
 is a single page is a bank with one item and one version per arm.
 
 ### What it gives up

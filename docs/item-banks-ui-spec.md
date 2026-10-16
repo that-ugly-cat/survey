@@ -1,8 +1,16 @@
 # Item banks — a visual editor
 
-*16 October 2026. Status: **phase 1 implemented** (`static/bank-editor.js`, the check route in `main.py`,
-`test_bank_editor.js` under Node and `test_bank_check.py`); phases 2–4 designed. Mockup:
+*16 October 2026. Status: **phases 1 and 2 implemented** (`static/bank-editor.js`, the check route in `main.py`,
+`test_bank_editor.js` under Node and `test_bank_check.py`; phase 2 in `rotation.py`, the rotation route
+and `test_rotation.py`); phases 3–4 designed. Mockup:
 `docs/mockups/item-banks-ui.html` (static, with just enough script to switch tabs and check sums).*
+
+**Phase 2 departs from the design once, to be narrower.** Instead of a general route that adds any
+calculated value, `POST /admin/surveys/{slug}/randomization/rotation` takes the parameters of a rotation
+(value name, question, wave, groups) and the server builds the expression (`rotation.py`); the browser
+never sends one. The editor's preview mirrors the same three functions in JavaScript, and the tests
+check both sides against the same expected strings and shares. A rotation the platform wrote is
+recognised on load, so a bank like PROMETEO's opens in the helper with its question and wave.
 
 **Phase 1 departs from the design in two places, both simpler.** The editor writes into the form fields
 the JSON view already had, so saving is the existing form post and its checks, unchanged; there is no
