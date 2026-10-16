@@ -80,6 +80,33 @@
       border-radius: 10px;
     }
 
+    /* A single-choice matrix fits the card. SurveyJS gives every column a
+       minimum width, so five agreement labels plus the row texts came out wider
+       than the question and the last column was cut off on a desktop screen
+       (narrow screens get the stacked mobile layout and never saw it). The
+       columns now share what is there, the row texts keep about a third, and the
+       labels wrap at word boundaries in a slightly smaller type. The floor is
+       the longest word of each label: seven long Italian ones ("Completamente
+       d'accordo") fit the 860px column at this size. A matrix wider still
+       scrolls inside its question, as SurveyJS already lets it. All of it stays
+       off the stacked layout, where the row text is a heading of its own. */
+    .sd-question:not(.sd-question--mobile) .sd-matrix__table {
+      --sd-table-cell-min-width: 0px;
+      width: 100%;
+    }
+    .sd-question:not(.sd-question--mobile) .sd-matrix__table .sd-table__cell--row-text {
+      width: 30%; min-width: 9rem;
+    }
+    .sd-question:not(.sd-question--mobile) .sd-matrix__table tbody .sd-table__cell:not(.sd-table__cell--row-text) {
+      padding-inline: 4px;
+    }
+    .sd-question:not(.sd-question--mobile) .sd-matrix__table thead .sd-table__cell--header {
+      padding-inline: 4px;
+      font-size: 0.8em; line-height: 1.25;
+      vertical-align: bottom;
+      overflow-wrap: break-word;
+    }
+
     @media (max-width: 620px) {
       header .sub { display: none; }
       header { padding: 0 0.9rem; gap: 0.6rem; }
