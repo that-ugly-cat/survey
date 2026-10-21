@@ -1,0 +1,18 @@
+# The Dockerfile copies the whole directory, so what must never be inside an
+# image is listed here. The database and the uploads arrive through the
+# ./data volume and the secrets through env_file; a copy baked into the image
+# would outlive every backup policy and travel with the image.
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db.*
+*.sqlite
+*.sqlite3
+.git/
+.claude/
+.venv/
+__pycache__/
+*.pyc
+*.survey.json
